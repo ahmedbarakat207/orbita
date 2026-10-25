@@ -5,6 +5,7 @@ export const MISSION_SCENARIOS = {
     name: 'Nominal Operations',
     tag: 'STABLE BASELINE',
     severity: 'nominal', // nominal, warning, critical
+    icon: 'fa-solid fa-shield-halved',
     description: 'Routine deep space transit conditions. Microgravity adaptation within expected flight parameters.',
     radiationFlux: 1.35, // mSv/day
     vitalsDelta: {
@@ -27,9 +28,9 @@ export const MISSION_SCENARIOS = {
       }
     ],
     countermeasures: [
-      { id: 'ared', title: 'Daily ARED Resistance Protocol', urgency: 'routine', duration: '90 min', icon: 'dumbbell' },
-      { id: 'cycle', title: 'T2 Cycle Ergometer Aerobic', urgency: 'routine', duration: '45 min', icon: 'activity' },
-      { id: 'hydration', title: 'Hydration Target (2.5L/day)', urgency: 'routine', duration: 'Continuous', icon: 'droplet' }
+      { id: 'ared', title: 'Daily ARED Resistance Protocol', urgency: 'routine', duration: '90 min', icon: 'fa-solid fa-dumbbell' },
+      { id: 'cycle', title: 'T2 Cycle Ergometer Aerobic', urgency: 'routine', duration: '45 min', icon: 'fa-solid fa-heart-pulse' },
+      { id: 'hydration', title: 'Hydration Target (2.5L/day)', urgency: 'routine', duration: 'Continuous', icon: 'fa-solid fa-droplet' }
     ],
     environmental: {
       ppco2: 2.7, // mmHg (safe is <3.0)
@@ -45,6 +46,7 @@ export const MISSION_SCENARIOS = {
     name: 'Solar Particle Event (SPE Class X2.8)',
     tag: 'RADIATION THREAT',
     severity: 'critical',
+    icon: 'fa-solid fa-radiation',
     description: 'External dosimeters detect coronal mass ejection shockwave. High proton flux breaching unshielded hull sections.',
     radiationFlux: 48.6, // mSv/day (Severe acute spike!)
     vitalsDelta: {
@@ -74,9 +76,9 @@ export const MISSION_SCENARIOS = {
       }
     ],
     countermeasures: [
-      { id: 'shelter', title: 'Deploy Water-Wall Radiation Shelter', urgency: 'immediate', duration: 'Until All-Clear', icon: 'shield-alert' },
-      { id: 'radioprotectant', title: 'Ingest Radioprotective Antioxidant Pack (Amifostine/Vitamin E)', urgency: 'immediate', duration: 'Stat dose', icon: 'pill' },
-      { id: 'personal_dosimeter', title: 'Recalibrate Personal Luminescent Dosimeter Badge', urgency: 'high', duration: '5 min', icon: 'radio' }
+      { id: 'shelter', title: 'Deploy Water-Wall Radiation Shelter', urgency: 'immediate', duration: 'Until All-Clear', icon: 'fa-solid fa-shield-halved' },
+      { id: 'radioprotectant', title: 'Ingest Radioprotective Antioxidant Pack (Amifostine/Vitamin E)', urgency: 'immediate', duration: 'Stat dose', icon: 'fa-solid fa-pills' },
+      { id: 'personal_dosimeter', title: 'Recalibrate Personal Luminescent Dosimeter Badge', urgency: 'high', duration: '5 min', icon: 'fa-solid fa-satellite-dish' }
     ],
     environmental: {
       ppco2: 3.1,
@@ -92,6 +94,7 @@ export const MISSION_SCENARIOS = {
     name: 'SANS & Cephalad Venous Stasis',
     tag: 'NEURO-OCULAR RISK',
     severity: 'warning',
+    icon: 'fa-solid fa-eye',
     description: 'Loss of gravitational hydrostatic pressure gradient causes upwards fluid redistribution, elevating intracranial pressure and distending optic nerve sheaths.',
     radiationFlux: 1.38,
     vitalsDelta: {
@@ -100,7 +103,7 @@ export const MISSION_SCENARIOS = {
       bpDia: 86,
       spo2: 98.1,
       temp: 37.0,
-      icp: 21.4, // Marked ICP increase! Normal in zero-G is <15
+      icp: 21.4, // Marked ICP increase
       hrv: 46,
       respRate: 15
     },
@@ -121,9 +124,9 @@ export const MISSION_SCENARIOS = {
       }
     ],
     countermeasures: [
-      { id: 'lbnp', title: 'Lower Body Negative Pressure (LBNP -35 mmHg)', urgency: 'high', duration: '45 min', icon: 'compass' },
-      { id: 'chorioretinal_scan', title: 'Perform Fundoscopy & ONSD Ultrasound Scan', urgency: 'high', duration: '20 min', icon: 'eye' },
-      { id: 'head_elevate', title: 'Attach Dynamic Venous Restrictive Neck Collar', urgency: 'medium', duration: '60 min', icon: 'life-buoy' }
+      { id: 'lbnp', title: 'Lower Body Negative Pressure (LBNP -35 mmHg)', urgency: 'high', duration: '45 min', icon: 'fa-solid fa-compress' },
+      { id: 'chorioretinal_scan', title: 'Perform Fundoscopy & ONSD Ultrasound Scan', urgency: 'high', duration: '20 min', icon: 'fa-solid fa-eye' },
+      { id: 'head_elevate', title: 'Attach Dynamic Venous Restrictive Neck Collar', urgency: 'medium', duration: '60 min', icon: 'fa-solid fa-life-ring' }
     ],
     environmental: {
       ppco2: 2.8,
@@ -139,6 +142,7 @@ export const MISSION_SCENARIOS = {
     name: 'Circadian Desynchrony & Severe Fatigue',
     tag: 'BEHAVIORAL RISK',
     severity: 'warning',
+    icon: 'fa-solid fa-bed',
     description: 'Disrupted orbital day/night cycles, EVA schedule shifts, and habitat noise induce chronic slow-wave sleep deficit and cognitive vigilance degradation.',
     radiationFlux: 1.36,
     vitalsDelta: {
@@ -168,9 +172,9 @@ export const MISSION_SCENARIOS = {
       }
     ],
     countermeasures: [
-      { id: 'pvt_test', title: 'Run Immediate 1-Minute PVT Fatigue Test', urgency: 'immediate', duration: '1 min', icon: 'clock' },
-      { id: 'phototherapy', title: 'Blue Spectrum 480nm Phototherapy Lightbox', urgency: 'high', duration: '30 min', icon: 'sun' },
-      { id: 'sleep_sanctuary', title: 'Scheduled Sleep Pod Isolation with Active Noise Cancel', urgency: 'high', duration: '90 min', icon: 'moon' }
+      { id: 'pvt_test', title: 'Run Immediate 1-Minute PVT Fatigue Test', urgency: 'immediate', duration: '1 min', icon: 'fa-solid fa-stopwatch' },
+      { id: 'phototherapy', title: 'Blue Spectrum 480nm Phototherapy Lightbox', urgency: 'high', duration: '30 min', icon: 'fa-solid fa-sun' },
+      { id: 'sleep_sanctuary', title: 'Scheduled Sleep Pod Isolation with Active Noise Cancel', urgency: 'high', duration: '90 min', icon: 'fa-solid fa-bed' }
     ],
     environmental: {
       ppco2: 3.2,
@@ -186,6 +190,7 @@ export const MISSION_SCENARIOS = {
     name: 'Accelerated Bone Loss & Renal Lithiasis Risk',
     tag: 'MUSCULOSKELETAL',
     severity: 'warning',
+    icon: 'fa-solid fa-bone',
     description: 'Absence of gravity-induced mechanical strain uncouples osteoblasts and osteoclasts, releasing bone calcium into blood and kidneys.',
     radiationFlux: 1.34,
     vitalsDelta: {
@@ -215,9 +220,9 @@ export const MISSION_SCENARIOS = {
       }
     ],
     countermeasures: [
-      { id: 'ared_heavy', title: 'ARED High-Resistance Axial Loading (Squat/Heel Raise)', urgency: 'high', duration: '60 min', icon: 'dumbbell' },
-      { id: 'citrate', title: 'Administer Potassium Citrate 20 mEq Oral Pack', urgency: 'high', duration: 'Stat', icon: 'pill' },
-      { id: 'fluid_load', title: 'Targeted Hydration Infusion (Electrolyte Electrolysis)', urgency: 'high', duration: '3.5L Target', icon: 'droplet' }
+      { id: 'ared_heavy', title: 'ARED High-Resistance Axial Loading (Squat/Heel Raise)', urgency: 'high', duration: '60 min', icon: 'fa-solid fa-dumbbell' },
+      { id: 'citrate', title: 'Administer Potassium Citrate 20 mEq Oral Pack', urgency: 'high', duration: 'Stat', icon: 'fa-solid fa-pills' },
+      { id: 'fluid_load', title: 'Targeted Hydration Infusion (Electrolyte Electrolysis)', urgency: 'high', duration: '3.5L Target', icon: 'fa-solid fa-droplet' }
     ],
     environmental: {
       ppco2: 2.7,

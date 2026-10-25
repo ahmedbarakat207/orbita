@@ -25,7 +25,7 @@ export class PvtTestModal {
               <span class="pvt-badge">NASA HRP COGNITIVE TEST</span>
               <h3>Psychomotor Vigilance Task (PVT-B)</h3>
             </div>
-            <button class="pvt-close-btn" id="pvt-close-btn">&times;</button>
+            <button class="pvt-close-btn" id="pvt-close-btn" aria-label="Close dialog"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
           <div class="pvt-instructions">
@@ -39,7 +39,7 @@ export class PvtTestModal {
 
           <div class="pvt-footer">
             <div class="pvt-trial-counter" id="pvt-trial-counter">Trial 0 of 3</div>
-            <button class="pvt-action-btn" id="pvt-action-btn">START TRIAL 1</button>
+            <button class="pvt-action-btn" id="pvt-action-btn"><i class="fa-solid fa-play"></i> START TRIAL 1</button>
           </div>
 
           <div class="pvt-results-summary" id="pvt-results-summary" style="display: none;">
@@ -58,7 +58,7 @@ export class PvtTestModal {
                 <span class="val status-ok" id="pvt-readiness-status">OPTIMAL</span>
               </div>
             </div>
-            <button class="pvt-accept-btn" id="pvt-accept-btn">LOG SCORE TO CREW PROFILE</button>
+            <button class="pvt-accept-btn" id="pvt-accept-btn"><i class="fa-solid fa-circle-check"></i> LOG SCORE TO CREW PROFILE</button>
           </div>
         </div>
       </div>

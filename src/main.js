@@ -1,3 +1,4 @@
+import '@fortawesome/fontawesome-free/css/all.min.css';
 import './style.css';
 import { CREW_MEMBERS } from './data/astronauts.js';
 import { MISSION_SCENARIOS } from './data/scenarios.js';
@@ -86,7 +87,7 @@ class App {
 
           <div class="header-telemetry-pills">
             <div class="telemetry-pill">
-              <span class="status-chip" id="env-pulse-dot">AUTONOMOUS</span>
+              <span class="status-chip" id="env-pulse-dot"><i class="fa-solid fa-satellite-dish"></i> AUTONOMOUS</span>
               <span class="pill-lbl">DSN Latency:</span>
               <span class="pill-val">22m 14s (Local Edge-AI Active)</span>
             </div>
@@ -108,29 +109,34 @@ class App {
         <div class="header-toolbar-row">
           <div class="toolbar-left">
             <div class="sim-selector-wrap">
-              <label for="sim-scenario-select"><strong>SIMULATION EVENT:</strong></label>
+              <label for="sim-scenario-select"><i class="fa-solid fa-sliders"></i> <strong>SIMULATION EVENT:</strong></label>
               <select id="sim-scenario-select" class="sim-select">
                 <option value="nominal">Nominal Baseline Flight</option>
-                <option value="solar_particle_event">⚠️ Solar Particle Event (SPE Radiation Alarm)</option>
-                <option value="sans_fluid_shift">👁️ SANS & Cephalad Intracranial Pressure Surge</option>
-                <option value="cognitive_exhaustion">💤 Circadian Desynchrony & Cognitive Fatigue</option>
-                <option value="hypercalciuria_bone">🦴 Hypercalciuria & Accelerated Bone Loss</option>
+                <option value="solar_particle_event">[SPE] Solar Particle Event (Radiation Alarm)</option>
+                <option value="sans_fluid_shift">[SANS] Cephalad Intracranial Pressure Surge</option>
+                <option value="cognitive_exhaustion">[FATIGUE] Circadian Desynchrony & Sleep Debt</option>
+                <option value="hypercalciuria_bone">[BONE] Hypercalciuria & Accelerated Demineralization</option>
               </select>
             </div>
 
             <div class="crew-toggle-group">
-              <button class="crew-toggle-btn active" id="btn-crew-elena" data-crew="elena_vance">Cmdr Vance</button>
-              <button class="crew-toggle-btn" id="btn-crew-marcus" data-crew="marcus_reid">Dr. Reid</button>
+              <button class="crew-toggle-btn active" id="btn-crew-elena" data-crew="elena_vance">
+                <i class="fa-solid fa-user-astronaut"></i> Cmdr Vance
+              </button>
+              <button class="crew-toggle-btn" id="btn-crew-marcus" data-crew="marcus_reid">
+                <i class="fa-solid fa-user-doctor"></i> Dr. Reid
+              </button>
             </div>
           </div>
 
           <div class="toolbar-right">
             <button class="icon-action-btn" id="btn-toggle-sound" title="Toggle Biometric Audio Synthesizer">
-              <span id="sound-icon">🔇</span>
+              <i id="sound-icon" class="fa-solid fa-volume-xmark"></i>
               <span id="sound-label">Audio: Muted</span>
             </button>
             <button class="icon-action-btn btn-nasa-report" id="btn-open-report">
-              <span>📋 Generate NASA Telemetry Record</span>
+              <i class="fa-solid fa-file-waveform"></i>
+              <span>Generate NASA Telemetry Record</span>
             </button>
           </div>
         </div>
@@ -145,7 +151,7 @@ class App {
         <section class="col-crew" aria-label="Astronaut Profile & Anatomy">
           <section class="console-panel" aria-label="Astronaut Profile">
             <div class="panel-header">
-              <h2><span>🧑‍🚀</span> Crew Profile & Physiological Model</h2>
+              <h2><i class="fa-solid fa-user-astronaut"></i> Crew Profile & Physiological Model</h2>
               <span class="header-tag" id="crew-badge-status">FLIGHT COMMANDER</span>
             </div>
 
@@ -195,7 +201,7 @@ class App {
           <!-- NASA R.I.D.G.E Risk Radar -->
           <section class="console-panel" aria-label="NASA Spaceflight Risk Index">
             <div class="panel-header">
-              <h2><span>🛰️</span> NASA R.I.D.G.E. Spaceflight Risk Index</h2>
+              <h2><i class="fa-solid fa-satellite-dish"></i> NASA R.I.D.G.E. Spaceflight Risk Index</h2>
               <span class="header-tag">HRP Standard</span>
             </div>
 
@@ -250,7 +256,7 @@ class App {
           <!-- Real-Time Oscilloscope Panel -->
           <section class="console-panel" aria-label="Continuous Physiological Stream">
             <div class="panel-header">
-              <h2><span>📈</span> Continuous Physiological Stream</h2>
+              <h2><i class="fa-solid fa-wave-square"></i> Continuous Physiological Stream</h2>
               <div class="header-tag" id="sweep-speed-badge">LEAD II · 25 mm/s</div>
             </div>
 
@@ -268,7 +274,7 @@ class App {
                 <div class="vital-box" id="box-hr">
                   <div class="vital-label-row">
                     <span class="vital-name">Heart Rate</span>
-                    <span class="vital-icon">❤️</span>
+                    <span class="vital-icon"><i class="fa-solid fa-heart-pulse"></i></span>
                   </div>
                   <div class="vital-value-row">
                     <span class="vital-number" id="val-hr">68</span>
@@ -280,7 +286,7 @@ class App {
                 <div class="vital-box" id="box-bp">
                   <div class="vital-label-row">
                     <span class="vital-name">Blood Press</span>
-                    <span class="vital-icon">🩸</span>
+                    <span class="vital-icon"><i class="fa-solid fa-droplet"></i></span>
                   </div>
                   <div class="vital-value-row">
                     <span class="vital-number" id="val-bp">116/74</span>
@@ -292,7 +298,7 @@ class App {
                 <div class="vital-box" id="box-spo2">
                   <div class="vital-label-row">
                     <span class="vital-name">Oxygen Sat</span>
-                    <span class="vital-icon">🫁</span>
+                    <span class="vital-icon"><i class="fa-solid fa-lungs"></i></span>
                   </div>
                   <div class="vital-value-row">
                     <span class="vital-number" id="val-spo2">98.4</span>
@@ -304,7 +310,7 @@ class App {
                 <div class="vital-box" id="box-icp">
                   <div class="vital-label-row">
                     <span class="vital-name">ICP Est.</span>
-                    <span class="vital-icon">🧠</span>
+                    <span class="vital-icon"><i class="fa-solid fa-brain"></i></span>
                   </div>
                   <div class="vital-value-row">
                     <span class="vital-number" id="val-icp">12.2</span>
@@ -316,7 +322,7 @@ class App {
                 <div class="vital-box" id="box-hrv">
                   <div class="vital-label-row">
                     <span class="vital-name">HRV (SDNN)</span>
-                    <span class="vital-icon">⚡</span>
+                    <span class="vital-icon"><i class="fa-solid fa-bolt"></i></span>
                   </div>
                   <div class="vital-value-row">
                     <span class="vital-number" id="val-hrv">62</span>
@@ -328,7 +334,7 @@ class App {
                 <div class="vital-box" id="box-temp">
                   <div class="vital-label-row">
                     <span class="vital-name">Core Temp</span>
-                    <span class="vital-icon">🌡️</span>
+                    <span class="vital-icon"><i class="fa-solid fa-temperature-half"></i></span>
                   </div>
                   <div class="vital-value-row">
                     <span class="vital-number" id="val-temp">36.9</span>
@@ -343,7 +349,7 @@ class App {
           <!-- Autonomous Edge-AI Diagnostic Engine -->
           <section class="console-panel" aria-label="Autonomous Clinical Diagnostics">
             <div class="panel-header">
-              <h2><span>🤖</span> Autonomous Clinical Diagnostic Engine</h2>
+              <h2><i class="fa-solid fa-microchip"></i> Autonomous Clinical Diagnostic Engine</h2>
               <span class="header-tag">Edge AI Decision Model v4.2</span>
             </div>
 
@@ -363,16 +369,18 @@ class App {
           <!-- Cognitive PVT Launcher Banner -->
           <div class="pvt-launcher-box">
             <div class="pvt-launcher-text">
-              <h3>Psychomotor Vigilance Task (PVT-B)</h3>
+              <h3><i class="fa-solid fa-stopwatch"></i> Psychomotor Vigilance Task (PVT-B)</h3>
               <p>Assess sustained reaction speed & operational readiness</p>
             </div>
-            <button class="pvt-launch-btn" id="btn-launch-pvt">RUN PVT TEST</button>
+            <button class="pvt-launch-btn" id="btn-launch-pvt">
+              <i class="fa-solid fa-play"></i> RUN PVT TEST
+            </button>
           </div>
 
           <!-- Active Prescribed Countermeasures -->
           <section class="console-panel" aria-label="Prescribed Countermeasures">
             <div class="panel-header">
-              <h2><span>🛡️</span> Prescribed Countermeasures</h2>
+              <h2><i class="fa-solid fa-shield-halved"></i> Prescribed Countermeasures</h2>
               <span class="header-tag">Act On Health</span>
             </div>
 
@@ -390,7 +398,7 @@ class App {
           <!-- Countermeasure Adherence & Weekly Progress -->
           <section class="console-panel" aria-label="Daily Protocol Adherence">
             <div class="panel-header">
-              <h2><span>📊</span> Daily Protocol Adherence</h2>
+              <h2><i class="fa-solid fa-chart-column"></i> Daily Protocol Adherence</h2>
               <span class="header-tag">Sol 142 Targets</span>
             </div>
 
@@ -545,7 +553,7 @@ class App {
         const icon = document.querySelector('#sound-icon');
         const label = document.querySelector('#sound-label');
         if (icon && label) {
-          icon.textContent = isMuted ? '🔇' : '🔊';
+          icon.className = isMuted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
           label.textContent = isMuted ? 'Audio: Muted' : 'Audio: Active';
         }
       });
@@ -608,16 +616,16 @@ class App {
     if (sc.severity === 'critical') {
       sound.playAlarm();
       if (pulseDot) {
-        pulseDot.textContent = 'SPE CRITICAL';
+        pulseDot.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> SPE CRITICAL';
         pulseDot.classList.add('alert');
       }
       bannerContainer.innerHTML = `
         <div class="critical-alert-banner">
           <div class="alert-content">
-            <span class="alert-badge">MISSION CRITICAL</span>
+            <span class="alert-badge"><i class="fa-solid fa-radiation"></i> MISSION CRITICAL</span>
             <span class="alert-msg">${sc.description}</span>
           </div>
-          <button class="alert-cta-btn" id="btn-banner-action">EXECUTE SHELTER PROTOCOL</button>
+          <button class="alert-cta-btn" id="btn-banner-action"><i class="fa-solid fa-shield-halved"></i> EXECUTE SHELTER PROTOCOL</button>
         </div>
       `;
       const bannerAction = bannerContainer.querySelector('#btn-banner-action');
@@ -628,7 +636,7 @@ class App {
       }
     } else {
       if (pulseDot) {
-        pulseDot.textContent = 'AUTONOMOUS';
+        pulseDot.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> AUTONOMOUS';
         pulseDot.classList.remove('alert');
       }
       bannerContainer.innerHTML = '';
@@ -681,9 +689,9 @@ class App {
     mount.innerHTML = cms.map(cm => `
       <div class="countermeasure-item" id="cm-${cm.id}">
         <div class="cm-info">
-          <h3 class="cm-title">${cm.title}</h3>
+          <h3 class="cm-title"><i class="${cm.icon}"></i> ${cm.title}</h3>
           <div class="cm-meta">
-            <span>⏱️ ${cm.duration}</span>
+            <span><i class="fa-solid fa-stopwatch"></i> ${cm.duration}</span>
             <span>&bull;</span>
             <span style="color: ${cm.urgency === 'immediate' ? 'var(--color-crimson-text)' : 'var(--color-text-cyan)'}; text-transform: uppercase;">
               ${cm.urgency}
@@ -775,7 +783,7 @@ class App {
     if (item) {
       const btn = item.querySelector('.cm-act-btn');
       if (btn) {
-        btn.textContent = '✓ COMPLETED';
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> COMPLETED';
         btn.style.background = 'var(--color-emerald)';
         btn.style.borderColor = 'var(--color-emerald)';
         btn.style.color = '#ffffff';

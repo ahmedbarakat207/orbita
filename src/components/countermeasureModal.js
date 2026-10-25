@@ -95,7 +95,7 @@ export class CountermeasureModal {
               <span class="modal-badge ${p.urgency}">${p.urgency.toUpperCase()} COUNTERMEASURE</span>
               <h3>${p.title}</h3>
             </div>
-            <button class="modal-close-btn" id="modal-close">&times;</button>
+            <button class="modal-close-btn" id="modal-close" aria-label="Close dialog"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
           <div class="modal-body">
@@ -104,8 +104,8 @@ export class CountermeasureModal {
             <div class="timer-section">
               <div class="timer-display" id="protocol-timer">${this.formatTime(this.secondsRemaining)}</div>
               <div class="timer-controls">
-                <button class="btn-ctrl start" id="timer-toggle">START PROTOCOL</button>
-                <button class="btn-ctrl complete" id="btn-force-complete">COMPLETE & RECORD</button>
+                <button class="btn-ctrl start" id="timer-toggle"><i class="fa-solid fa-play"></i> START PROTOCOL</button>
+                <button class="btn-ctrl complete" id="btn-force-complete"><i class="fa-solid fa-check"></i> COMPLETE & RECORD</button>
               </div>
             </div>
           </div>

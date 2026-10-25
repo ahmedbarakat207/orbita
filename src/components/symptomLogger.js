@@ -9,7 +9,7 @@ export class SymptomLogger {
       {
         id: 'log-1',
         time: 'Sol 142 07:15 UTC',
-        symptom: 'Slight visual blur when reading cockpit display',
+        symptom: 'Slight visual blur when reading cockpit instrument display',
         category: 'Ocular / SANS',
         severity: 2,
         actionTaken: 'Flagged for Fundoscopy + LBNP countermeasure',
@@ -33,19 +33,29 @@ export class SymptomLogger {
     this.container.innerHTML = `
       <section class="console-panel" aria-label="Astronaut Self-Reporting Log">
         <div class="panel-header">
-          <h2><span>📝</span> Astronaut Self-Reporting & Clinical Log</h2>
+          <h2><i class="fa-solid fa-clipboard-user"></i> Astronaut Self-Reporting & Clinical Log</h2>
           <span class="header-tag">Crew Autonomous Input</span>
         </div>
         <div class="panel-body">
 
         <form class="symptom-form" id="symptom-form">
           <div class="quick-symptoms-row">
-            <span class="quick-label">Quick Symptoms:</span>
-            <button type="button" class="tag-btn" data-symptom="Ocular Blur / Focus Shift" data-cat="Ocular / SANS" data-sev="2">👁️ Visual Blur</button>
-            <button type="button" class="tag-btn" data-symptom="Cephalad Facial Fullness / Stuffy Sinuses" data-cat="Fluid Shift" data-sev="1">👤 Head Fullness</button>
-            <button type="button" class="tag-btn" data-symptom="Retinal Cosmic Ray Light Flashes (Phosphenes)" data-cat="Radiation" data-sev="3">✨ Phosphenes</button>
-            <button type="button" class="tag-btn" data-symptom="Vestibular Disorientation / Otolith Nausea" data-cat="Neuro-Vestibular" data-sev="2">🌀 Space Sickness</button>
-            <button type="button" class="tag-btn" data-symptom="Intervertebral Back Ache (Elongation)" data-cat="Spinal Axis" data-sev="2">🦴 Spine Pain</button>
+            <span class="quick-label">Clinical Quick-Tags:</span>
+            <button type="button" class="tag-btn" data-symptom="Ocular Blur / Focus Shift" data-cat="Ocular / SANS" data-sev="2">
+              <i class="fa-solid fa-eye"></i> Visual Blur
+            </button>
+            <button type="button" class="tag-btn" data-symptom="Cephalad Facial Fullness / Stuffy Sinuses" data-cat="Fluid Shift" data-sev="1">
+              <i class="fa-solid fa-head-side-virus"></i> Cephalad Fullness
+            </button>
+            <button type="button" class="tag-btn" data-symptom="Retinal Cosmic Ray Light Flashes (Phosphenes)" data-cat="Radiation" data-sev="3">
+              <i class="fa-solid fa-radiation"></i> Phosphenes
+            </button>
+            <button type="button" class="tag-btn" data-symptom="Vestibular Disorientation / Otolith Nausea" data-cat="Neuro-Vestibular" data-sev="2">
+              <i class="fa-solid fa-arrows-spin"></i> Space Sickness
+            </button>
+            <button type="button" class="tag-btn" data-symptom="Intervertebral Back Ache (Elongation)" data-cat="Spinal Axis" data-sev="2">
+              <i class="fa-solid fa-bone"></i> Spine Ache
+            </button>
           </div>
 
           <div class="input-group">
@@ -59,7 +69,7 @@ export class SymptomLogger {
             </div>
 
             <button type="submit" class="submit-symptom-btn">
-              <span>Log Entry & Analyze</span>
+              <i class="fa-solid fa-microchip"></i> <span>Log Entry & Analyze</span>
             </button>
           </div>
         </form>
@@ -84,7 +94,7 @@ export class SymptomLogger {
         </div>
         <div class="log-body">${log.symptom}</div>
         <div class="log-action">
-          <span class="action-tag">Autonomous Recommendation:</span> ${log.actionTaken}
+          <span class="action-tag"><i class="fa-solid fa-robot"></i> Recommendation:</span> ${log.actionTaken}
         </div>
       </div>
     `).join('');
@@ -128,7 +138,6 @@ export class SymptomLogger {
       const sev = parseInt(sevRange.value, 10);
       if (!text) return;
 
-      // Heuristic AI action determination
       let action = 'Logged for routine medical officer review.';
       let category = 'General Health';
 

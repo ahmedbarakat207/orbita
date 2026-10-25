@@ -30,7 +30,7 @@ export class ReportModal {
                 <span class="sub">CREW MEDICAL OPERATIONS SYSTEM (CMOS) · FLIGHT DOSSIER</span>
               </div>
             </div>
-            <button class="report-close-btn" id="report-close">&times;</button>
+            <button class="report-close-btn" id="report-close" aria-label="Close dialog"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
           <div class="report-body" id="printable-report">
@@ -121,15 +121,15 @@ export class ReportModal {
 
             <div class="report-footer-auth">
               <div class="auth-box">
-                <span class="auth-seal">&#10003; AUTONOMOUS EDGE-AI VERIFIED</span>
+                <span class="auth-seal"><i class="fa-solid fa-circle-check"></i> AUTONOMOUS EDGE-AI VERIFIED</span>
                 <p>Validated by NASA Human Research Program Deep Space Clinical Heuristics Engine. Downlink packet compressed for Deep Space Network (DSN) transmission.</p>
               </div>
             </div>
           </div>
 
           <div class="report-actions">
-            <button class="report-print-btn" id="report-print-btn">PRINT / EXPORT PDF</button>
-            <button class="report-dl-btn" id="report-dl-btn">DOWNLOAD DSN JSON PACKET</button>
+            <button class="report-print-btn" id="report-print-btn"><i class="fa-solid fa-print"></i> PRINT / EXPORT PDF</button>
+            <button class="report-dl-btn" id="report-dl-btn"><i class="fa-solid fa-download"></i> DOWNLOAD DSN JSON PACKET</button>
           </div>
         </div>
       </div>
