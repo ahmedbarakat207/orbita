@@ -9,6 +9,10 @@ import { PvtTestModal } from './components/pvtTest.js';
 import { SymptomLogger } from './components/symptomLogger.js';
 import { CountermeasureModal } from './components/countermeasureModal.js';
 import { ReportModal } from './components/reportModal.js';
+import { BleService } from './services/bleService.js';
+import { SerialService } from './services/serialService.js';
+import { RppgService } from './services/rppgService.js';
+import { HardwareModal } from './components/hardwareModal.js';
 
 class App {
   constructor() {
@@ -28,6 +32,13 @@ class App {
     this.cmModal = null;
     this.reportModal = null;
     this.symptomLogger = null;
+
+    // Hardware Biosensor Services
+    this.bleService = null;
+    this.serialService = null;
+    this.rppgService = null;
+    this.hardwareModal = null;
+    this.activeHardwareSource = null;
 
     // Hotspot info database
     this.hotspotDetails = {
@@ -65,6 +76,7 @@ class App {
     this.initEcg();
     this.initHologram();
     this.initModals();
+    this.initHardware();
     this.initSymptomLogger();
     this.attachEventListeners();
     this.startTelemetryLoop();
@@ -90,6 +102,10 @@ class App {
               <span class="status-chip" id="env-pulse-dot"><i class="fa-solid fa-satellite-dish"></i> AUTONOMOUS</span>
               <span class="pill-lbl">DSN Latency:</span>
               <span class="pill-val">22m 14s (Local Edge-AI Active)</span>
+            </div>
+            <div class="telemetry-pill">
+              <span class="pill-lbl">Sensor Feed:</span>
+              <span class="pill-val" id="sensor-feed-source">Simulated Flight Baseline</span>
             </div>
             <div class="telemetry-pill">
               <span class="pill-lbl">Cabin ppCO₂:</span>
@@ -130,6 +146,10 @@ class App {
           </div>
 
           <div class="toolbar-right">
+            <button class="icon-action-btn btn-hardware-io" id="btn-open-hardware" title="Connect Real Biosensors (BLE / USB Serial / Camera rPPG)">
+              <i class="fa-solid fa-microchip"></i>
+              <span id="hardware-btn-label">Sensor I/O: Hardware Interface</span>
+            </button>
             <button class="icon-action-btn" id="btn-toggle-sound" title="Toggle Biometric Audio Synthesizer">
               <i id="sound-icon" class="fa-solid fa-volume-xmark"></i>
               <span id="sound-label">Audio: Muted</span>
@@ -145,111 +165,61 @@ class App {
       <!-- Alert Banner (shown during critical events) -->
       <div id="alert-banner-container"></div>
 
-      <!-- Main Three-Column Dashboard Grid -->
-      <main class="dashboard-grid">
-        <!-- COLUMN 1: Crew Dossier & Physiological Hologram Avatar -->
-        <section class="col-crew" aria-label="Astronaut Profile & Anatomy">
-          <section class="console-panel" aria-label="Astronaut Profile">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-user-astronaut"></i> Crew Profile & Physiological Model</h2>
-              <span class="header-tag" id="crew-badge-status">FLIGHT COMMANDER</span>
-            </div>
-
-            <div class="panel-body">
-              <div class="astronaut-dossier">
-                <div class="astronaut-portrait-wrap">
-                  <img id="astronaut-img" class="astronaut-portrait-img" src="${this.activeCrew.photo}" alt="${this.activeCrew.name}" />
-                </div>
-                <div class="dossier-info">
-                  <h3 id="astronaut-name">${this.activeCrew.name}</h3>
-                  <div class="dossier-role" id="astronaut-role">${this.activeCrew.role}</div>
-                  <div class="dossier-callsign" id="astronaut-callsign">${this.activeCrew.callsign} · ${this.activeCrew.bloodType}</div>
-                </div>
+      <!-- Main Two-Tier Workstation Container -->
+      <main class="dashboard-container">
+        <!-- TIER 1: Primary Real-Time Operations (Balanced Opening Row) -->
+        <div class="dashboard-opening-row">
+          <!-- COLUMN 1: Crew Dossier & Physiological Hologram Avatar -->
+          <section class="col-crew" aria-label="Astronaut Profile & Anatomy">
+            <section class="console-panel" aria-label="Astronaut Profile">
+              <div class="panel-header">
+                <h2><i class="fa-solid fa-user-astronaut"></i> Crew Profile & Physiological Model</h2>
+                <span class="header-tag" id="crew-badge-status">FLIGHT COMMANDER</span>
               </div>
 
-              <!-- Flat Data Table (Banning Nested Cards) -->
-              <div class="dossier-data-table">
-                <div class="dossier-cell">
-                  <span class="lbl">Zero-G Exposure</span>
-                  <span class="val" id="meta-zero-g">${this.activeCrew.daysInMicrogravity} Sols</span>
+              <div class="panel-body">
+                <div class="astronaut-dossier">
+                  <div class="astronaut-portrait-wrap">
+                    <img id="astronaut-img" class="astronaut-portrait-img" src="${this.activeCrew.photo}" alt="${this.activeCrew.name}" />
+                  </div>
+                  <div class="dossier-info">
+                    <h3 id="astronaut-name">${this.activeCrew.name}</h3>
+                    <div class="dossier-role" id="astronaut-role">${this.activeCrew.role}</div>
+                    <div class="dossier-callsign" id="astronaut-callsign">${this.activeCrew.callsign} · ${this.activeCrew.bloodType}</div>
+                  </div>
                 </div>
-                <div class="dossier-cell">
-                  <span class="lbl">Mass Delta</span>
-                  <span class="val" id="meta-mass-delta">${this.activeCrew.massLossSinceLaunch}</span>
+
+                <!-- Flat Data Table (Banning Nested Cards) -->
+                <div class="dossier-data-table">
+                  <div class="dossier-cell">
+                    <span class="lbl">Zero-G Exposure</span>
+                    <span class="val" id="meta-zero-g">${this.activeCrew.daysInMicrogravity} Sols</span>
+                  </div>
+                  <div class="dossier-cell">
+                    <span class="lbl">Mass Delta</span>
+                    <span class="val" id="meta-mass-delta">${this.activeCrew.massLossSinceLaunch}</span>
+                  </div>
+                  <div class="dossier-cell">
+                    <span class="lbl">Baseline VO₂ Max</span>
+                    <span class="val" id="meta-vo2">${this.activeCrew.baselineVO2Max}</span>
+                  </div>
+                  <div class="dossier-cell">
+                    <span class="lbl">Total EVA Time</span>
+                    <span class="val" id="meta-eva">${this.activeCrew.evaHoursTotal}</span>
+                  </div>
                 </div>
-                <div class="dossier-cell">
-                  <span class="lbl">Baseline VO₂ Max</span>
-                  <span class="val" id="meta-vo2">${this.activeCrew.baselineVO2Max}</span>
-                </div>
-                <div class="dossier-cell">
-                  <span class="lbl">Total EVA Time</span>
-                  <span class="val" id="meta-eva">${this.activeCrew.evaHoursTotal}</span>
+
+                <!-- Anatomical Hologram Avatar -->
+                <div id="body-hologram-mount"></div>
+
+                <!-- Hotspot Explanation Panel -->
+                <div class="hotspot-detail-panel" id="hotspot-panel">
+                  <h3 id="hotspot-title">Cerebrovascular & Intracranial Pressure (ICP)</h3>
+                  <p id="hotspot-desc">Microgravity eliminates the head-to-toe hydrostatic gradient, translocating fluid cephalad and raising intracranial pressure.</p>
                 </div>
               </div>
-
-              <!-- Anatomical Hologram Avatar -->
-              <div id="body-hologram-mount"></div>
-
-              <!-- Hotspot Explanation Panel -->
-              <div class="hotspot-detail-panel" id="hotspot-panel">
-                <h3 id="hotspot-title">Cerebrovascular & Intracranial Pressure (ICP)</h3>
-                <p id="hotspot-desc">Microgravity eliminates the head-to-toe hydrostatic gradient, translocating fluid cephalad and raising intracranial pressure.</p>
-              </div>
-            </div>
+            </section>
           </section>
-
-          <!-- NASA R.I.D.G.E Risk Radar -->
-          <section class="console-panel" aria-label="NASA Spaceflight Risk Index">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-satellite-dish"></i> NASA R.I.D.G.E. Spaceflight Risk Index</h2>
-              <span class="header-tag">HRP Standard</span>
-            </div>
-
-            <div class="panel-body">
-              <div class="ridge-risk-bars">
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[R] Radiation Exposure</span>
-                    <span id="risk-val-r">14% Career Cap</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill cyan" id="risk-fill-r" style="width: 14%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[I] Isolation & Stress Index</span>
-                    <span id="risk-val-i">18% Low</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill violet" id="risk-fill-i" style="width: 18%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[D] Distance / AI Autonomy Need</span>
-                    <span>95% High</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill cyan" style="width: 95%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[G] Microgravity Deconditioning</span>
-                    <span id="risk-val-g">22% Moderate</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill amber" id="risk-fill-g" style="width: 22%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[E] Closed Environment Hazard</span>
-                    <span id="risk-val-e">12% Nominal</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill cyan" id="risk-fill-e" style="width: 12%;"></div></div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </section>
 
         <!-- COLUMN 2: Live Physiological Telemetry & Autonomous AI Diagnostics -->
         <section class="col-telemetry" aria-label="Biometric Telemetry & Diagnostics">
@@ -345,23 +315,6 @@ class App {
               </div>
             </div>
           </section>
-
-          <!-- Autonomous Edge-AI Diagnostic Engine -->
-          <section class="console-panel" aria-label="Autonomous Clinical Diagnostics">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-microchip"></i> Autonomous Clinical Diagnostic Engine</h2>
-              <span class="header-tag">Edge AI Decision Model v4.2</span>
-            </div>
-
-            <div class="panel-body">
-              <div class="diagnostics-list" id="diagnostics-container">
-                <!-- Dynamically rendered diagnostic cards -->
-              </div>
-            </div>
-          </section>
-
-          <!-- Self-Reporting Symptom Logger Mount -->
-          <div id="symptom-logger-mount"></div>
         </section>
 
         <!-- COLUMN 3: Actionable Countermeasures & Clinical Actions -->
@@ -386,11 +339,88 @@ class App {
 
             <div class="panel-body">
               <p style="font-size: 0.8125rem; color: var(--color-text-secondary); margin-bottom: 0.875rem;">
-                Autonomous clinical protocols prescribed for direct execution by the astronaut to arrest physiological degradation.
+                Autonomous clinical protocols prescribed for direct execution by the astronaut to arrest physiological&nbsp;degradation.
               </p>
 
               <div class="countermeasures-list" id="countermeasures-container">
                 <!-- Dynamically populated countermeasures -->
+              </div>
+            </div>
+          </section>
+        </section>
+      </div>
+
+      <!-- TIER 2: Deep Diagnostics, Clinical Logging & Risk Analytics -->
+      <div class="dashboard-secondary-row">
+        <!-- LEFT: Edge-AI Clinical Diagnostics & Crew Clinical Log -->
+        <div class="secondary-left">
+          <section class="console-panel" aria-label="Autonomous Clinical Diagnostics">
+            <div class="panel-header">
+              <h2><i class="fa-solid fa-microchip"></i> Autonomous Clinical Diagnostic Engine</h2>
+              <span class="header-tag">Edge AI Decision Model v4.2</span>
+            </div>
+
+            <div class="panel-body">
+              <div class="diagnostics-list" id="diagnostics-container">
+                <!-- Dynamically rendered diagnostic cards -->
+              </div>
+            </div>
+          </section>
+
+          <!-- Self-Reporting Symptom Logger Mount -->
+          <div id="symptom-logger-mount"></div>
+        </div>
+
+        <!-- RIGHT: NASA R.I.D.G.E Risk Radar & Daily Protocol Adherence -->
+        <div class="secondary-right">
+          <!-- NASA R.I.D.G.E Risk Radar -->
+          <section class="console-panel" aria-label="NASA Spaceflight Risk Index">
+            <div class="panel-header">
+              <h2><i class="fa-solid fa-satellite-dish"></i> NASA R.I.D.G.E. Spaceflight Risk Index</h2>
+              <span class="header-tag">HRP Standard</span>
+            </div>
+
+            <div class="panel-body">
+              <div class="ridge-risk-bars">
+                <div class="risk-bar-row">
+                  <div class="risk-label-row">
+                    <span>[R] Radiation Exposure</span>
+                    <span id="risk-val-r">14% Career Cap</span>
+                  </div>
+                  <div class="risk-track"><div class="risk-fill cyan" id="risk-fill-r" style="width: 14%;"></div></div>
+                </div>
+
+                <div class="risk-bar-row">
+                  <div class="risk-label-row">
+                    <span>[I] Isolation & Stress Index</span>
+                    <span id="risk-val-i">18% Low</span>
+                  </div>
+                  <div class="risk-track"><div class="risk-fill violet" id="risk-fill-i" style="width: 18%;"></div></div>
+                </div>
+
+                <div class="risk-bar-row">
+                  <div class="risk-label-row">
+                    <span>[D] Distance / AI Autonomy Need</span>
+                    <span>95% High</span>
+                  </div>
+                  <div class="risk-track"><div class="risk-fill cyan" style="width: 95%;"></div></div>
+                </div>
+
+                <div class="risk-bar-row">
+                  <div class="risk-label-row">
+                    <span>[G] Microgravity Deconditioning</span>
+                    <span id="risk-val-g">22% Moderate</span>
+                  </div>
+                  <div class="risk-track"><div class="risk-fill amber" id="risk-fill-g" style="width: 22%;"></div></div>
+                </div>
+
+                <div class="risk-bar-row">
+                  <div class="risk-label-row">
+                    <span>[E] Closed Environment Hazard</span>
+                    <span id="risk-val-e">12% Nominal</span>
+                  </div>
+                  <div class="risk-track"><div class="risk-fill emerald" style="width: 12%;"></div></div>
+                </div>
               </div>
             </div>
           </section>
@@ -438,8 +468,9 @@ class App {
               </div>
             </div>
           </section>
-        </section>
-      </main>
+        </div>
+      </div>
+    </main>
 
       <!-- Footer -->
       <footer class="mission-footer">
@@ -499,6 +530,87 @@ class App {
     });
 
     this.reportModal = new ReportModal(modalMount);
+  }
+
+  initHardware() {
+    const modalMount = document.querySelector('#modal-container');
+
+    const handleBiosensorData = (data) => {
+      if (data.hr && data.hr > 0) {
+        this.currentVitals.hr = data.hr;
+      }
+      if (data.hrv && data.hrv > 0) {
+        this.currentVitals.hrv = data.hrv;
+      }
+      if (data.spo2 && data.spo2 > 0) {
+        this.currentVitals.spo2 = data.spo2;
+      }
+      if (data.temp && data.temp > 0) {
+        this.currentVitals.temp = data.temp;
+      }
+      if (data.bpSys && data.bpSys > 0) {
+        this.currentVitals.bpSys = data.bpSys;
+        this.currentVitals.bpDia = data.bpDia || 80;
+      }
+      if (data.icp && data.icp > 0) {
+        this.currentVitals.icp = data.icp;
+      }
+
+      if (this.ecg && this.currentVitals.hr > 0) {
+        this.ecg.setBpm(this.currentVitals.hr);
+      }
+
+      if (this.hardwareModal && data.hr) {
+        this.hardwareModal.updateRppgBpm(data.hr);
+      }
+
+      this.updateVitalsDisplay();
+    };
+
+    const handleStatusChange = () => {};
+
+    this.bleService = new BleService(handleBiosensorData, handleStatusChange);
+    this.serialService = new SerialService(
+      handleBiosensorData,
+      handleStatusChange,
+      (line) => {
+        if (this.hardwareModal) {
+          this.hardwareModal.logSerial(line);
+        }
+      }
+    );
+    this.rppgService = new RppgService(handleBiosensorData, handleStatusChange);
+
+    this.hardwareModal = new HardwareModal(
+      modalMount,
+      this.bleService,
+      this.serialService,
+      this.rppgService,
+      (sourceName) => {
+        this.handleSourceChanged(sourceName);
+      }
+    );
+  }
+
+  handleSourceChanged(sourceName) {
+    this.activeHardwareSource = sourceName.includes('Simulated') ? null : sourceName;
+    const label = document.querySelector('#hardware-btn-label');
+    const feedSource = document.querySelector('#sensor-feed-source');
+    const hwBtn = document.querySelector('#btn-open-hardware');
+
+    if (label) {
+      label.textContent = this.activeHardwareSource ? `Sensor: ${sourceName}` : 'Sensor I/O: Hardware Interface';
+    }
+    if (feedSource) {
+      feedSource.textContent = sourceName;
+    }
+    if (hwBtn) {
+      if (this.activeHardwareSource) {
+        hwBtn.classList.add('active-hardware');
+      } else {
+        hwBtn.classList.remove('active-hardware');
+      }
+    }
   }
 
   initSymptomLogger() {
@@ -568,6 +680,14 @@ class App {
         this.pvtModal = new PvtTestModal(mount, (results) => {
           this.handlePvtCompletion(results);
         });
+      });
+    }
+
+    // Hardware Biosensor Modal launcher
+    const hwBtn = document.querySelector('#btn-open-hardware');
+    if (hwBtn) {
+      hwBtn.addEventListener('click', () => {
+        this.hardwareModal.open();
       });
     }
 
@@ -825,16 +945,19 @@ class App {
 
   startTelemetryLoop() {
     setInterval(() => {
-      const hrJitter = (Math.random() - 0.5) * 1.5;
-      const bpJitter = (Math.random() - 0.5) * 1.0;
-      const spo2Jitter = (Math.random() - 0.5) * 0.1;
+      // If a real hardware biosensor is actively connected, do not overwrite with simulated random jitter
+      if (!this.activeHardwareSource) {
+        const hrJitter = (Math.random() - 0.5) * 1.5;
+        const bpJitter = (Math.random() - 0.5) * 1.0;
+        const spo2Jitter = (Math.random() - 0.5) * 0.1;
 
-      this.currentVitals.hr = Math.max(45, Math.min(160, this.currentVitals.hr + hrJitter * 0.2));
-      this.currentVitals.bpSys = Math.max(90, Math.min(180, this.currentVitals.bpSys + bpJitter * 0.1));
-      this.currentVitals.spo2 = Math.max(94.0, Math.min(100.0, this.currentVitals.spo2 + spo2Jitter * 0.05));
+        this.currentVitals.hr = Math.max(45, Math.min(160, this.currentVitals.hr + hrJitter * 0.2));
+        this.currentVitals.bpSys = Math.max(90, Math.min(180, this.currentVitals.bpSys + bpJitter * 0.1));
+        this.currentVitals.spo2 = Math.max(94.0, Math.min(100.0, this.currentVitals.spo2 + spo2Jitter * 0.05));
 
-      if (this.ecg) {
-        this.ecg.setBpm(this.currentVitals.hr);
+        if (this.ecg) {
+          this.ecg.setBpm(this.currentVitals.hr);
+        }
       }
 
       this.updateVitalsDisplay();
