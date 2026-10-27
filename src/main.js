@@ -39,6 +39,7 @@ class App {
     this.rppgService = null;
     this.hardwareModal = null;
     this.activeHardwareSource = null;
+    this.isOffWrist = false;
 
     // Hotspot info database
     this.hotspotDetails = {
@@ -146,9 +147,9 @@ class App {
           </div>
 
           <div class="toolbar-right">
-            <button class="icon-action-btn btn-hardware-io" id="btn-open-hardware" title="Connect Real Biosensors (BLE / USB Serial / Camera rPPG)">
-              <i class="fa-solid fa-microchip"></i>
-              <span id="hardware-btn-label">Sensor I/O: Hardware Interface</span>
+            <button class="icon-action-btn btn-hardware-io" id="btn-open-hardware" title="Connect Physical ESP32-C3 Wristband / USB Serial / BLE / Camera rPPG">
+              <i class="fa-solid fa-ring"></i>
+              <span id="hardware-btn-label">ESP32-C3 Band: Setup & Link</span>
             </button>
             <button class="icon-action-btn" id="btn-toggle-sound" title="Toggle Biometric Audio Synthesizer">
               <i id="sound-icon" class="fa-solid fa-volume-xmark"></i>
@@ -536,28 +537,61 @@ class App {
     const modalMount = document.querySelector('#modal-container');
 
     const handleBiosensorData = (data) => {
-      if (data.hr && data.hr > 0) {
-        this.currentVitals.hr = data.hr;
-      }
-      if (data.hrv && data.hrv > 0) {
-        this.currentVitals.hrv = data.hrv;
-      }
-      if (data.spo2 && data.spo2 > 0) {
-        this.currentVitals.spo2 = data.spo2;
-      }
-      if (data.temp && data.temp > 0) {
-        this.currentVitals.temp = data.temp;
-      }
-      if (data.bpSys && data.bpSys > 0) {
-        this.currentVitals.bpSys = data.bpSys;
-        this.currentVitals.bpDia = data.bpDia || 80;
-      }
-      if (data.icp && data.icp > 0) {
-        this.currentVitals.icp = data.icp;
+      // Forward to HardwareModal so live metrics update in real-time
+      if (this.hardwareModal) {
+        this.hardwareModal.updateTelemetry(data);
       }
 
-      if (this.ecg && this.currentVitals.hr > 0) {
-        this.ecg.setBpm(this.currentVitals.hr);
+      if (data.finger !== undefined) {
+        this.isOffWrist = !data.finger;
+        if (this.ecg) {
+          this.ecg.setOffWrist(this.isOffWrist);
+        }
+      }
+
+      if (this.isOffWrist) {
+        // True off-wrist state: no fake data, no decay, no synthetic numbers
+        this.currentVitals.hr = 0;
+        this.currentVitals.spo2 = 0;
+        this.currentVitals.hrv = 0;
+        if (data.temp && data.temp > 0) {
+          this.currentVitals.temp = data.temp;
+        }
+        if (data.batt) {
+          this.currentVitals.battery = data.batt;
+        }
+      } else {
+        // Skin contact confirmed - use real physical sensor data
+        this.isOffWrist = false;
+        if (this.ecg) {
+          this.ecg.setOffWrist(false);
+        }
+
+        if (data.hr && data.hr > 0) {
+          this.currentVitals.hr = data.hr;
+          if (this.ecg) {
+            this.ecg.setBpm(this.currentVitals.hr);
+          }
+        }
+        if (data.hrv && data.hrv > 0) {
+          this.currentVitals.hrv = data.hrv;
+        }
+        if (data.spo2 && data.spo2 > 0) {
+          this.currentVitals.spo2 = data.spo2;
+        }
+        if (data.temp && data.temp > 0) {
+          this.currentVitals.temp = data.temp;
+        }
+        if (data.bpSys && data.bpSys > 0) {
+          this.currentVitals.bpSys = data.bpSys;
+          this.currentVitals.bpDia = data.bpDia || 80;
+        }
+        if (data.icp && data.icp > 0) {
+          this.currentVitals.icp = data.icp;
+        }
+        if (data.batt) {
+          this.currentVitals.battery = data.batt;
+        }
       }
 
       if (this.hardwareModal && data.hr) {
@@ -598,11 +632,25 @@ class App {
     const feedSource = document.querySelector('#sensor-feed-source');
     const hwBtn = document.querySelector('#btn-open-hardware');
 
+    if (!this.activeHardwareSource) {
+      this.isOffWrist = false;
+      this.currentVitals = { ...this.activeCrew.baseVitals };
+      if (this.ecg) {
+        this.ecg.setOffWrist(false);
+        this.ecg.setBpm(this.currentVitals.hr);
+      }
+    }
+
     if (label) {
-      label.textContent = this.activeHardwareSource ? `Sensor: ${sourceName}` : 'Sensor I/O: Hardware Interface';
+      label.textContent = this.activeHardwareSource ? `Hardware: ${sourceName}` : 'ESP32-C3 Band: Setup & Link';
     }
     if (feedSource) {
       feedSource.textContent = sourceName;
+      if (this.activeHardwareSource) {
+        feedSource.classList.add('stream-hardware-active');
+      } else {
+        feedSource.classList.remove('stream-hardware-active');
+      }
     }
     if (hwBtn) {
       if (this.activeHardwareSource) {
@@ -611,6 +659,7 @@ class App {
         hwBtn.classList.remove('active-hardware');
       }
     }
+    this.updateVitalsDisplay();
   }
 
   initSymptomLogger() {
@@ -880,6 +929,19 @@ class App {
     const boxIcp = document.querySelector('#box-icp');
     const boxHrv = document.querySelector('#box-hrv');
 
+    if (this.activeHardwareSource && this.isOffWrist) {
+      if (hrEl) hrEl.textContent = '--';
+      if (bpEl) bpEl.textContent = '--/--';
+      if (spo2El) spo2El.textContent = '--';
+      if (hrvEl) hrvEl.textContent = '--';
+      if (tempEl) tempEl.textContent = this.currentVitals.temp ? this.currentVitals.temp.toFixed(1) : '--';
+      if (icpEl) icpEl.textContent = this.currentVitals.icp ? this.currentVitals.icp.toFixed(1) : '--';
+
+      if (boxHr) boxHr.className = 'vital-box off-wrist-state';
+      if (boxHrv) boxHrv.className = 'vital-box off-wrist-state';
+      return;
+    }
+
     if (hrEl) hrEl.textContent = Math.round(this.currentVitals.hr);
     if (bpEl) bpEl.textContent = `${Math.round(this.currentVitals.bpSys)}/${Math.round(this.currentVitals.bpDia)}`;
     if (spo2El) spo2El.textContent = this.currentVitals.spo2.toFixed(1);
@@ -945,19 +1007,21 @@ class App {
 
   startTelemetryLoop() {
     setInterval(() => {
-      // If a real hardware biosensor is actively connected, do not overwrite with simulated random jitter
-      if (!this.activeHardwareSource) {
-        const hrJitter = (Math.random() - 0.5) * 1.5;
-        const bpJitter = (Math.random() - 0.5) * 1.0;
-        const spo2Jitter = (Math.random() - 0.5) * 0.1;
+      // If a real physical hardware band is connected, zero simulated jitter or decay
+      if (this.activeHardwareSource) {
+        return;
+      }
 
-        this.currentVitals.hr = Math.max(45, Math.min(160, this.currentVitals.hr + hrJitter * 0.2));
-        this.currentVitals.bpSys = Math.max(90, Math.min(180, this.currentVitals.bpSys + bpJitter * 0.1));
-        this.currentVitals.spo2 = Math.max(94.0, Math.min(100.0, this.currentVitals.spo2 + spo2Jitter * 0.05));
+      const hrJitter = (Math.random() - 0.5) * 1.5;
+      const bpJitter = (Math.random() - 0.5) * 1.0;
+      const spo2Jitter = (Math.random() - 0.5) * 0.1;
 
-        if (this.ecg) {
-          this.ecg.setBpm(this.currentVitals.hr);
-        }
+      this.currentVitals.hr = Math.max(45, Math.min(160, this.currentVitals.hr + hrJitter * 0.2));
+      this.currentVitals.bpSys = Math.max(90, Math.min(180, this.currentVitals.bpSys + bpJitter * 0.1));
+      this.currentVitals.spo2 = Math.max(94.0, Math.min(100.0, this.currentVitals.spo2 + spo2Jitter * 0.05));
+
+      if (this.ecg) {
+        this.ecg.setBpm(this.currentVitals.hr);
       }
 
       this.updateVitalsDisplay();

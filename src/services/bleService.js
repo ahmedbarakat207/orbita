@@ -19,15 +19,22 @@ export class BleService {
     }
 
     try {
-      this.updateStatus('requesting', 'Scanning for Bluetooth Low Energy medical devices...');
+      this.updateStatus('requesting', 'Scanning for AURA-BAND-C3 & Bluetooth Low Energy medical devices...');
 
-      // Standard Bluetooth GATT Heart Rate (0x180D) and Pulse Oximeter (0x1822)
+      // Support custom ESP32-C3 AURA Band & standard GATT Heart Rate / Oximeter devices
       this.device = await navigator.bluetooth.requestDevice({
         filters: [
+          { namePrefix: 'AURA' },
           { services: ['heart_rate'] },
           { services: ['pulse_oximeter'] }
         ],
-        optionalServices: ['battery_service', 'device_information']
+        optionalServices: [
+          '4fafc201-1fb5-459e-8fcc-c5c9c331914b', // Custom AURA Telemetry Service
+          'heart_rate',
+          'pulse_oximeter',
+          'battery_service',
+          'device_information'
+        ]
       });
 
       this.device.addEventListener('gattserverdisconnected', () => {
@@ -37,14 +44,54 @@ export class BleService {
       this.updateStatus('connecting', `Connecting to ${this.device.name || 'BLE Device'}...`);
       this.server = await this.device.gatt.connect();
 
-      // Connect to Heart Rate Service (0x180D)
-      const service = await this.server.getPrimaryService('heart_rate');
-      this.characteristic = await service.getCharacteristic('heart_rate_measurement');
+      let subscribedAny = false;
 
-      await this.characteristic.startNotifications();
-      this.characteristic.addEventListener('characteristicvaluechanged', (e) => {
-        this.parseHeartRate(e.target.value);
-      });
+      // 1. Try Custom AURA Telemetry Service (Full JSON stream from ESP32-C3)
+      try {
+        const auraService = await this.server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+        const auraChar = await auraService.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+        await auraChar.startNotifications();
+        auraChar.addEventListener('characteristicvaluechanged', (e) => {
+          this.parseAuraJson(e.target.value);
+        });
+        subscribedAny = true;
+      } catch (e) {
+        // Not an ESP32-C3 custom service or service not present, proceed to standard GATT
+      }
+
+      // 2. Standard Heart Rate Service (0x180D)
+      try {
+        const hrService = await this.server.getPrimaryService('heart_rate');
+        const hrChar = await hrService.getCharacteristic('heart_rate_measurement');
+        await hrChar.startNotifications();
+        hrChar.addEventListener('characteristicvaluechanged', (e) => {
+          this.parseHeartRate(e.target.value);
+        });
+        subscribedAny = true;
+      } catch (e) {
+        // heart_rate service not available
+      }
+
+      // 3. Optional Battery Service (0x180F)
+      try {
+        const battService = await this.server.getPrimaryService('battery_service');
+        const battChar = await battService.getCharacteristic('battery_level');
+        const battVal = await battChar.readValue();
+        const battPct = battVal.getUint8(0);
+        if (this.onData) {
+          this.onData({
+            source: this.device.name || 'BLE Device',
+            batt: battPct,
+            timestamp: Date.now()
+          });
+        }
+      } catch (e) {
+        // battery_service not available
+      }
+
+      if (!subscribedAny) {
+        throw new Error('Device does not expose AURA Telemetry or Heart Rate GATT services.');
+      }
 
       this.isConnected = true;
       this.updateStatus('connected', `Streaming live telemetry from ${this.device.name || 'Medical Wearable'}`);
@@ -56,7 +103,7 @@ export class BleService {
   }
 
   disconnect() {
-    if (this.device && this.device.gatt.connected) {
+    if (this.device && this.device.gatt && this.device.gatt.connected) {
       this.device.gatt.disconnect();
     }
     this.handleDisconnect();
@@ -73,6 +120,32 @@ export class BleService {
   updateStatus(state, message) {
     if (this.onStatus) {
       this.onStatus({ state, message, isConnected: this.isConnected, deviceName: this.device?.name || null });
+    }
+  }
+
+  // Parse raw JSON packet emitted by ESP32-C3 firmware
+  parseAuraJson(dataView) {
+    try {
+      const decoder = new TextDecoder('utf-8');
+      const jsonStr = decoder.decode(dataView);
+      const data = JSON.parse(jsonStr);
+
+      if (this.onData) {
+        this.onData({
+          source: `ESP32-C3 Band (${this.device?.name || 'AURA-BAND-C3'})`,
+          hr: data.hr ?? null,
+          spo2: data.spo2 ?? null,
+          temp: data.temp ?? null,
+          hrv: data.hrv ?? null,
+          batt: data.batt ?? null,
+          finger: typeof data.finger === 'boolean' ? data.finger : (data.hr > 0),
+          rawIR: data.ir ?? null,
+          rawRed: data.red ?? null,
+          timestamp: Date.now()
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to parse AURA BLE JSON packet:', err);
     }
   }
 
@@ -118,12 +191,13 @@ export class BleService {
       hrv = Math.round(Math.sqrt(variance));
     }
 
-    if (this.onData && hr > 0) {
+    if (this.onData) {
       this.onData({
-        source: 'Web Bluetooth (BLE)',
-        hr,
+        source: this.device?.name || 'Web Bluetooth (BLE)',
+        hr: hr > 0 ? hr : 0,
         hrv,
         rrIntervals,
+        finger: hr > 0 || hasContact,
         timestamp: Date.now()
       });
     }

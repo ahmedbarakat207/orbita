@@ -21,9 +21,14 @@ export class EcgOscilloscope {
     this.cyclePhase = 0; // 0 to 1
     this.lastTimestamp = 0;
     this.isBeating = false;
+    this.isOffWrist = false;
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  setOffWrist(isOff) {
+    this.isOffWrist = Boolean(isOff);
   }
 
   resize() {
@@ -52,6 +57,11 @@ export class EcgOscilloscope {
 
   // Generate realistic P-Q-R-S-T voltage at phase (0 to 1)
   getEcgVoltage(phase) {
+    if (this.isOffWrist) {
+      // True flatline baseline with slight analog sensor noise
+      return (Math.random() - 0.5) * 0.015;
+    }
+
     // Normal ECG wave intervals within cardiac cycle
     // 0.00 - 0.10: baseline
     // 0.10 - 0.20: P-wave (atrial depolarization)
@@ -99,6 +109,10 @@ export class EcgOscilloscope {
 
   // Generate realistic plethysmograph pulse wave (PPG)
   getPlethVoltage(phase) {
+    if (this.isOffWrist) {
+      return 0;
+    }
+
     // Pulse arrives slightly delayed after R-wave
     const delayed = (phase + 0.85) % 1.0;
     if (delayed < 0.4) {
@@ -262,5 +276,26 @@ export class EcgOscilloscope {
     ctx.arc(this.sweepX, sweepY, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+
+    // 5. Clinical Contact Status Overlay
+    if (this.isOffWrist) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
+      ctx.lineWidth = 1;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(12, 12, 230, 24, 4);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillRect(12, 12, 230, 24);
+        ctx.strokeRect(12, 12, 230, 24);
+      }
+      ctx.font = '600 10px Outfit, -apple-system, sans-serif';
+      ctx.fillStyle = '#fca5a5';
+      ctx.fillText('LEAD OFF · WRISTBAND SENSOR IDLE', 20, 28);
+      ctx.restore();
+    }
   }
 }
