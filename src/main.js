@@ -1,1044 +1,624 @@
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import './style.css';
-import { CREW_MEMBERS } from './data/astronauts.js';
-import { MISSION_SCENARIOS } from './data/scenarios.js';
-import { sound } from './services/sound.js';
-import { EcgOscilloscope } from './components/ecgCanvas.js';
-import { BodyHologram } from './components/bodyHologram.js';
-import { PvtTestModal } from './components/pvtTest.js';
-import { SymptomLogger } from './components/symptomLogger.js';
-import { CountermeasureModal } from './components/countermeasureModal.js';
-import { ReportModal } from './components/reportModal.js';
 import { BleService } from './services/bleService.js';
 import { SerialService } from './services/serialService.js';
 import { RppgService } from './services/rppgService.js';
-import { HardwareModal } from './components/hardwareModal.js';
+import { TrendHistoryChart } from './components/trendHistoryChart.js';
+import { SessionRecorder } from './services/sessionRecorder.js';
+import { physiologicalEngine } from './services/physiologicalEngine.js';
+import { DeviceManager } from './services/deviceManager.js';
+import { UserManager } from './services/userManager.js';
+import { BodyStatusFigure } from './components/bodyStatusFigure.js';
+import { TerminalLogger } from './components/terminalLogger.js';
+import { DeviceSettingsModal } from './components/deviceSettingsModal.js';
+import { AddUserModal } from './components/addUserModal.js';
+import { NotificationDispatcher } from './services/notificationDispatcher.js';
+
+// 'sensor' = direct hardware channel; 'est' = calculated estimate
+const VITALS_DEF = [
+  { id: 'hr', name: 'Heart rate', unit: 'BPM', icon: 'fa-heart-pulse', src: 'sensor',
+    fmt: (v) => Math.round(v),
+    note: (v) => (v < 60 ? 'Bradycardia' : v > 100 ? 'Tachycardia' : 'Normal sinus'),
+    level: (v) => (v > 100 ? 'critical-state' : v > 85 ? 'warning-state' : '') },
+  { id: 'spo2', name: 'Blood oxygen', unit: '%', icon: 'fa-lungs', src: 'sensor',
+    fmt: (v) => Math.round(v),
+    note: (v, s) => {
+      if (s?.spo2Measuring) return 'Optical sampling in progress...';
+      if (s?.spo2Timestamp) {
+        const measuredDate = new Date(s.spo2Timestamp.replace(' ', 'T'));
+        const diffMins = Math.max(0, Math.round((Date.now() - measuredDate.getTime()) / 60000));
+        const ageStr = diffMins < 1 ? 'Just now' : diffMins < 60 ? `${diffMins}m ago` : `${Math.round(diffMins / 60)}h ago`;
+        return `Sampled ${s.spo2Timestamp.slice(11, 16)} (${ageStr})`;
+      }
+      return v >= 95 ? 'Optimal perfusion' : 'Hypoxia alert';
+    },
+    level: (v) => (v < 94 ? 'critical-state' : v < 96 ? 'warning-state' : '') },
+  { id: 'stress', name: 'Stress', unit: '/100', icon: 'fa-gauge-high', src: 'sensor',
+    fmt: (v) => Math.round(v),
+    note: (v, s) => {
+      const mode = s?.stressMode === 'live_optical' ? 'Live autonomic tone' : 'Optical PPG';
+      if (v <= 35) return `Relaxed · ${mode}`;
+      if (v <= 55) return `Nominal · ${mode}`;
+      if (v <= 75) return `Medium stress · ${mode}`;
+      return `High stress · ${mode}`;
+    },
+    level: (v) => (v > 65 ? 'critical-state' : v > 40 ? 'warning-state' : '') },
+  { id: 'hrv', name: 'HRV (SDNN)', unit: 'ms', icon: 'fa-bolt', src: 'sensor',
+    fmt: (v) => Math.round(v),
+    note: () => 'Optical beat interval',
+    level: () => '' },
+  { id: 'bp', name: 'Blood pressure', unit: 'mmHg', icon: 'fa-droplet', src: 'est',
+    level: () => '' },
+  { id: 'map', name: 'Mean art. press.', unit: 'mmHg', icon: 'fa-gauge', src: 'est',
+    fmt: (v) => Math.round(v),
+    note: () => 'Perfusion pressure',
+    level: () => '' },
+  { id: 'respRate', name: 'Respiration', unit: 'BrPM', icon: 'fa-wind', src: 'est',
+    fmt: (v) => Math.round(v),
+    note: () => 'RSA coupled',
+    level: () => '' },
+  { id: 'temp', name: 'Body temp', unit: '°C', icon: 'fa-temperature-half', src: 'est',
+    fmt: (v) => v.toFixed(1),
+    note: () => 'Metabolic model',
+    level: (v) => (v > 38 ? 'critical-state' : v > 37.5 ? 'warning-state' : '') }
+];
+
+const EMPTY_VITALS = () => ({
+  hr: null, hrv: null, spo2: null, stress: null,
+  respRate: null, bpSys: null, bpDia: null, map: null, temp: null
+});
 
 class App {
   constructor() {
-    this.crewMembers = CREW_MEMBERS;
-    this.activeCrew = this.crewMembers[0];
-    this.currentScenarioKey = 'nominal';
-    this.currentScenario = MISSION_SCENARIOS.nominal;
-    
-    // Dynamic vitals tracking
-    this.currentVitals = { ...this.activeCrew.baseVitals };
-    this.symptomLogs = [];
-
-    // Component references
-    this.ecg = null;
-    this.hologram = null;
-    this.pvtModal = null;
-    this.cmModal = null;
-    this.reportModal = null;
-    this.symptomLogger = null;
-
-    // Hardware Biosensor Services
-    this.bleService = null;
-    this.serialService = null;
-    this.rppgService = null;
-    this.hardwareModal = null;
+    this.deviceManager = new DeviceManager(() => this.handleDeviceManagerUpdate());
+    this.userManager = new UserManager(this.deviceManager, () => this.handleDeviceManagerUpdate());
+    this.notificationDispatcher = new NotificationDispatcher(null);
     this.activeHardwareSource = null;
     this.isOffWrist = false;
+    this.lastLogThrottle = 0;
 
-    // Hotspot info database
-    this.hotspotDetails = {
-      brain: {
-        title: 'Cerebrovascular & Intracranial Pressure (ICP)',
-        description: 'Microgravity eliminates the head-to-toe hydrostatic gradient, translocating ~2 liters of blood and interstitial fluid cephalad. This elevates intracranial pressure and impairs glymphatic waste clearance during sleep.'
-      },
-      ocular: {
-        title: 'Spaceflight Associated Neuro-ocular Syndrome (SANS)',
-        description: 'Cephalad venous congestion and retrobulbar optic nerve sheath distention lead to choroidal folds, optic disc edema, and hyperopic refractive shifts in over 70% of long-duration astronauts.'
-      },
-      cardio: {
-        title: 'Cardiovascular Remodeling & Arrhythmia Risk',
-        description: 'Cardiac shape rounds into a more spherical morphology due to reduced mechanical pre-load. Total circulating plasma volume decreases by ~15-20%, heightening risk of post-landing orthostatic intolerance.'
-      },
-      spine: {
-        title: 'Spinal Axial Elongation & Disc Decompression',
-        description: 'Absence of gravity unloads intervertebral discs, causing water absorption and spinal elongation (crew can grow 5-7 cm in flight), inducing back pain and post-mission lumbar disc herniation risk.'
-      },
-      renal: {
-        title: 'Hypercalciuria & Nephrolithiasis (Kidney Stone) Susceptibility',
-        description: 'Massive osteoclastic bone resorption dumps calcium into the circulatory system. Filtered through kidneys, it precipitates into calcium oxalate/phosphate crystals in dehydrated flight environments.'
-      },
-      musculoskeletal: {
-        title: 'Trabecular Bone Demineralization & Soleus Muscle Atrophy',
-        description: 'Weight-bearing postural muscles (soleus, gastrocnemius, quadriceps) atrophy up to 20% without heavy mechanical loading. Femoral neck and lumbar bone density degrades at 1.0-1.5% per month.'
-      }
-    };
-
-    this.init();
-  }
-
-  init() {
-    this.renderLayout();
-    this.initEcg();
-    this.initHologram();
-    this.initModals();
+    this.render();
+    this.initBodyStatusFigure();
+    this.initTerminalLogger();
+    this.initTrendChart();
+    this.initSessionRecorder();
+    this.initSettingsModal();
     this.initHardware();
-    this.initSymptomLogger();
-    this.attachEventListeners();
-    this.startTelemetryLoop();
-    this.startMetClock();
+    this.updateDisplay();
+
+    if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
   }
 
-  renderLayout() {
-    const appEl = document.querySelector('#app');
-    appEl.innerHTML = `
-      <!-- Aerospace Header -->
-      <header class="mission-header" id="mission-header">
+  render() {
+    const boxes = VITALS_DEF.map((v) => `
+      <div class="vital-box" id="box-${v.id}">
+        <div class="vital-label-row">
+          <span class="vital-name">${v.name}${v.src === 'est' ? ' (est.)' : ''}</span>
+          <span class="vital-icon"><i class="fa-solid ${v.icon}"></i></span>
+        </div>
+        <div class="vital-value-row">
+          <span class="vital-number" id="val-${v.id}">--</span>
+          <span class="vital-unit">${v.unit}</span>
+        </div>
+        <div class="vital-status-sub" id="sub-${v.id}"></div>
+      </div>`).join('');
+
+    const activity = [
+      ['steps', 'Steps', ''],
+      ['distanceMeters', 'Distance', 'm'],
+      ['caloriesKcal', 'Calories', 'kcal'],
+      ['batt', 'Watch battery', '%']
+    ].map(([k, label, unit]) => `
+      <div class="vital-box" id="box-act-${k}">
+        <div class="vital-label-row"><span class="vital-name">${label}</span></div>
+        <div class="vital-value-row">
+          <span class="vital-number" id="act-${k}">--</span>
+          <span class="vital-unit">${unit}</span>
+        </div>
+      </div>`).join('');
+
+    document.querySelector('#app').innerHTML = `
+      <header class="mission-header">
         <div class="header-top-row">
           <div class="brand-group">
-            <span class="nasa-meatball-badge">NASA · HRP</span>
             <div class="brand-text">
-              <h1>AURA-OS <span class="sub-title">BioFlight</span></h1>
-              <div class="brand-tagline">Autonomous Deep Space Crew Health & Countermeasure System</div>
+              <h1>ORBITA</h1>
             </div>
           </div>
 
           <div class="header-telemetry-pills">
-            <div class="telemetry-pill">
-              <span class="status-chip" id="env-pulse-dot"><i class="fa-solid fa-satellite-dish"></i> AUTONOMOUS</span>
-              <span class="pill-lbl">DSN Latency:</span>
-              <span class="pill-val">22m 14s (Local Edge-AI Active)</span>
-            </div>
-            <div class="telemetry-pill">
-              <span class="pill-lbl">Sensor Feed:</span>
-              <span class="pill-val" id="sensor-feed-source">Simulated Flight Baseline</span>
-            </div>
-            <div class="telemetry-pill">
-              <span class="pill-lbl">Cabin ppCO₂:</span>
-              <span class="pill-val" id="hud-ppco2">2.7 mmHg</span>
-            </div>
-            <div class="telemetry-pill">
-              <span class="pill-lbl">Rad Flux:</span>
-              <span class="pill-val" id="hud-rad-flux">1.35 mSv/d</span>
-            </div>
-            <div class="telemetry-pill">
-              <span class="pill-lbl">MET:</span>
-              <span class="pill-val" id="met-clock">Sol 142 · 09:42:15 UTC</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="header-toolbar-row">
-          <div class="toolbar-left">
-            <div class="sim-selector-wrap">
-              <label for="sim-scenario-select"><i class="fa-solid fa-sliders"></i> <strong>SIMULATION EVENT:</strong></label>
-              <select id="sim-scenario-select" class="sim-select">
-                <option value="nominal">Nominal Baseline Flight</option>
-                <option value="solar_particle_event">[SPE] Solar Particle Event (Radiation Alarm)</option>
-                <option value="sans_fluid_shift">[SANS] Cephalad Intracranial Pressure Surge</option>
-                <option value="cognitive_exhaustion">[FATIGUE] Circadian Desynchrony & Sleep Debt</option>
-                <option value="hypercalciuria_bone">[BONE] Hypercalciuria & Accelerated Demineralization</option>
-              </select>
+            <!-- Multi-Watch Selector Pills -->
+            <div class="watch-selector-pills" id="watch-selector-mount">
+              <!-- Rendered dynamically -->
             </div>
 
-            <div class="crew-toggle-group">
-              <button class="crew-toggle-btn active" id="btn-crew-elena" data-crew="elena_vance">
-                <i class="fa-solid fa-user-astronaut"></i> Cmdr Vance
-              </button>
-              <button class="crew-toggle-btn" id="btn-crew-marcus" data-crew="marcus_reid">
-                <i class="fa-solid fa-user-doctor"></i> Dr. Reid
-              </button>
-            </div>
-          </div>
-
-          <div class="toolbar-right">
-            <button class="icon-action-btn btn-hardware-io" id="btn-open-hardware" title="Connect Physical ESP32-C3 Wristband / USB Serial / BLE / Camera rPPG">
-              <i class="fa-solid fa-ring"></i>
-              <span id="hardware-btn-label">ESP32-C3 Band: Setup & Link</span>
+            <!-- Emergency Alerts & Notification Permission Pill -->
+            <button class="watch-pill notif-pill" id="btn-toggle-notifs" title="Click to allow OS notifications & emergency sound">
+              <span class="pill-dot" id="notif-pill-dot"></span>
+              <i class="fa-solid fa-bell"></i>
+              <span id="notif-pill-text">ENABLE ALERTS</span>
             </button>
-            <button class="icon-action-btn" id="btn-toggle-sound" title="Toggle Biometric Audio Synthesizer">
-              <i id="sound-icon" class="fa-solid fa-volume-xmark"></i>
-              <span id="sound-label">Audio: Muted</span>
-            </button>
-            <button class="icon-action-btn btn-nasa-report" id="btn-open-report">
-              <i class="fa-solid fa-file-waveform"></i>
-              <span>Generate NASA Telemetry Record</span>
+
+            <!-- Settings Launcher Button -->
+            <button class="icon-action-btn btn-hardware-io" id="btn-open-settings" title="Open Watch Settings & Manager">
+              <i class="fa-solid fa-sliders"></i>
+              <span id="settings-btn-label">WATCH SETTINGS</span>
             </button>
           </div>
         </div>
       </header>
 
-      <!-- Alert Banner (shown during critical events) -->
-      <div id="alert-banner-container"></div>
-
-      <!-- Main Two-Tier Workstation Container -->
       <main class="dashboard-container">
-        <!-- TIER 1: Primary Real-Time Operations (Balanced Opening Row) -->
-        <div class="dashboard-opening-row">
-          <!-- COLUMN 1: Crew Dossier & Physiological Hologram Avatar -->
-          <section class="col-crew" aria-label="Astronaut Profile & Anatomy">
-            <section class="console-panel" aria-label="Astronaut Profile">
+        <div class="dashboard-main-grid">
+          <!-- LEFT COLUMN: Telemetry, Activity, Trend, Terminal -->
+          <div class="dashboard-telemetry-col">
+            <!-- Vitals Grid (4x2 Matrix) -->
+            <section class="console-panel">
               <div class="panel-header">
-                <h2><i class="fa-solid fa-user-astronaut"></i> Crew Profile & Physiological Model</h2>
-                <span class="header-tag" id="crew-badge-status">FLIGHT COMMANDER</span>
+                <h2><i class="fa-solid fa-heart-pulse"></i> // PHYSIOLOGICAL VITALS</h2>
+                <span class="header-tag" id="active-watch-tag">[ ORBITA 1 · LIVE ]</span>
               </div>
-
               <div class="panel-body">
-                <div class="astronaut-dossier">
-                  <div class="astronaut-portrait-wrap">
-                    <img id="astronaut-img" class="astronaut-portrait-img" src="${this.activeCrew.photo}" alt="${this.activeCrew.name}" />
-                  </div>
-                  <div class="dossier-info">
-                    <h3 id="astronaut-name">${this.activeCrew.name}</h3>
-                    <div class="dossier-role" id="astronaut-role">${this.activeCrew.role}</div>
-                    <div class="dossier-callsign" id="astronaut-callsign">${this.activeCrew.callsign} · ${this.activeCrew.bloodType}</div>
-                  </div>
+                <div class="vitals-grid">${boxes}</div>
+              </div>
+            </section>
+
+            <!-- Activity Grid (4 Tiles) -->
+            <section class="console-panel">
+              <div class="panel-header">
+                <h2><i class="fa-solid fa-person-walking"></i> // ACTIGRAPHY & POWER</h2>
+              </div>
+              <div class="panel-body">
+                <div class="vitals-grid">${activity}</div>
+              </div>
+            </section>
+
+            <!-- Trend Chart (5-Min Rolling Oscilloscope) -->
+            <section class="console-panel telemetry-vault-panel">
+              <div class="panel-header">
+                <div class="vault-header-title">
+                  <h2><i class="fa-solid fa-chart-line"></i> // 5-MIN TREND OSCILLOSCOPE</h2>
                 </div>
-
-                <!-- Flat Data Table (Banning Nested Cards) -->
-                <div class="dossier-data-table">
-                  <div class="dossier-cell">
-                    <span class="lbl">Zero-G Exposure</span>
-                    <span class="val" id="meta-zero-g">${this.activeCrew.daysInMicrogravity} Sols</span>
-                  </div>
-                  <div class="dossier-cell">
-                    <span class="lbl">Mass Delta</span>
-                    <span class="val" id="meta-mass-delta">${this.activeCrew.massLossSinceLaunch}</span>
-                  </div>
-                  <div class="dossier-cell">
-                    <span class="lbl">Baseline VO₂ Max</span>
-                    <span class="val" id="meta-vo2">${this.activeCrew.baselineVO2Max}</span>
-                  </div>
-                  <div class="dossier-cell">
-                    <span class="lbl">Total EVA Time</span>
-                    <span class="val" id="meta-eva">${this.activeCrew.evaHoursTotal}</span>
-                  </div>
+                <div class="trend-channel-pills">
+                  <button class="trend-pill active" data-channel="hr"><span class="pill-dot" style="background:#eaeaea"></span> HR</button>
+                  <button class="trend-pill active" data-channel="spo2"><span class="pill-dot" style="background:#4af626"></span> SpO₂</button>
+                  <button class="trend-pill active" data-channel="stress"><span class="pill-dot" style="background:#f59e0b"></span> STRESS</button>
+                  <button class="trend-pill" data-channel="hrv"><span class="pill-dot" style="background:#ff2a2a"></span> HRV</button>
                 </div>
-
-                <!-- Anatomical Hologram Avatar -->
-                <div id="body-hologram-mount"></div>
-
-                <!-- Hotspot Explanation Panel -->
-                <div class="hotspot-detail-panel" id="hotspot-panel">
-                  <h3 id="hotspot-title">Cerebrovascular & Intracranial Pressure (ICP)</h3>
-                  <p id="hotspot-desc">Microgravity eliminates the head-to-toe hydrostatic gradient, translocating fluid cephalad and raising intracranial pressure.</p>
+              </div>
+              <div class="panel-body vault-panel-body">
+                <div class="trend-canvas-wrap"><canvas id="trend-canvas"></canvas></div>
+                <div class="vault-toolbar">
+                  <div class="vault-toolbar-left">
+                    <button class="vault-btn primary" id="btn-session-record">
+                      <i class="fa-solid fa-circle-dot" id="rec-btn-icon"></i>
+                      <span id="rec-btn-label">RECORD</span>
+                    </button>
+                    <div class="vault-status-chip" id="session-status-chip">
+                      <span id="session-status-text">Not recording</span>
+                    </div>
+                  </div>
+                  <div class="vault-toolbar-right">
+                    <button class="vault-btn secondary" id="btn-session-export-csv"><i class="fa-solid fa-file-csv"></i> CSV</button>
+                    <button class="vault-btn secondary" id="btn-session-export-json"><i class="fa-solid fa-file-code"></i> JSON</button>
+                  </div>
                 </div>
               </div>
             </section>
-          </section>
 
-        <!-- COLUMN 2: Live Physiological Telemetry & Autonomous AI Diagnostics -->
-        <section class="col-telemetry" aria-label="Biometric Telemetry & Diagnostics">
-          <!-- Real-Time Oscilloscope Panel -->
-          <section class="console-panel" aria-label="Continuous Physiological Stream">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-wave-square"></i> Continuous Physiological Stream</h2>
-              <div class="header-tag" id="sweep-speed-badge">LEAD II · 25 mm/s</div>
-            </div>
-
-            <div class="panel-body">
-              <div class="ecg-canvas-wrapper">
-                <canvas id="ecg-canvas"></canvas>
-                <div class="canvas-legends">
-                  <div class="legend-item"><span class="legend-color cyan"></span> Lead II ECG</div>
-                  <div class="legend-item"><span class="legend-color emerald"></span> PPG Plethysmogram</div>
-                </div>
-              </div>
-
-              <!-- Vital Signs Workstation Grid (Flat Grid, No Nested Container Cards) -->
-              <div class="vitals-grid">
-                <div class="vital-box" id="box-hr">
-                  <div class="vital-label-row">
-                    <span class="vital-name">Heart Rate</span>
-                    <span class="vital-icon"><i class="fa-solid fa-heart-pulse"></i></span>
-                  </div>
-                  <div class="vital-value-row">
-                    <span class="vital-number" id="val-hr">68</span>
-                    <span class="vital-unit">BPM</span>
-                  </div>
-                  <div class="vital-status-sub" id="sub-hr">Resting Bradycardia</div>
-                </div>
-
-                <div class="vital-box" id="box-bp">
-                  <div class="vital-label-row">
-                    <span class="vital-name">Blood Press</span>
-                    <span class="vital-icon"><i class="fa-solid fa-droplet"></i></span>
-                  </div>
-                  <div class="vital-value-row">
-                    <span class="vital-number" id="val-bp">116/74</span>
-                    <span class="vital-unit">mmHg</span>
-                  </div>
-                  <div class="vital-status-sub" id="sub-bp">MAP: 88 mmHg</div>
-                </div>
-
-                <div class="vital-box" id="box-spo2">
-                  <div class="vital-label-row">
-                    <span class="vital-name">Oxygen Sat</span>
-                    <span class="vital-icon"><i class="fa-solid fa-lungs"></i></span>
-                  </div>
-                  <div class="vital-value-row">
-                    <span class="vital-number" id="val-spo2">98.4</span>
-                    <span class="vital-unit">%</span>
-                  </div>
-                  <div class="vital-status-sub" id="sub-spo2">Optimal Perfusion</div>
-                </div>
-
-                <div class="vital-box" id="box-icp">
-                  <div class="vital-label-row">
-                    <span class="vital-name">ICP Est.</span>
-                    <span class="vital-icon"><i class="fa-solid fa-brain"></i></span>
-                  </div>
-                  <div class="vital-value-row">
-                    <span class="vital-number" id="val-icp">12.2</span>
-                    <span class="vital-unit">mmHg</span>
-                  </div>
-                  <div class="vital-status-sub" id="sub-icp">Cephalad Gradient Ok</div>
-                </div>
-
-                <div class="vital-box" id="box-hrv">
-                  <div class="vital-label-row">
-                    <span class="vital-name">HRV (SDNN)</span>
-                    <span class="vital-icon"><i class="fa-solid fa-bolt"></i></span>
-                  </div>
-                  <div class="vital-value-row">
-                    <span class="vital-number" id="val-hrv">62</span>
-                    <span class="vital-unit">ms</span>
-                  </div>
-                  <div class="vital-status-sub" id="sub-hrv">Parasympathetic Dom.</div>
-                </div>
-
-                <div class="vital-box" id="box-temp">
-                  <div class="vital-label-row">
-                    <span class="vital-name">Core Temp</span>
-                    <span class="vital-icon"><i class="fa-solid fa-temperature-half"></i></span>
-                  </div>
-                  <div class="vital-value-row">
-                    <span class="vital-number" id="val-temp">36.9</span>
-                    <span class="vital-unit">°C</span>
-                  </div>
-                  <div class="vital-status-sub" id="sub-temp">Spaceflight Baseline</div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </section>
-
-        <!-- COLUMN 3: Actionable Countermeasures & Clinical Actions -->
-        <section class="col-actions" aria-label="Actionable Countermeasures Hub">
-          <!-- Cognitive PVT Launcher Banner -->
-          <div class="pvt-launcher-box">
-            <div class="pvt-launcher-text">
-              <h3><i class="fa-solid fa-stopwatch"></i> Psychomotor Vigilance Task (PVT-B)</h3>
-              <p>Assess sustained reaction speed & operational readiness</p>
-            </div>
-            <button class="pvt-launch-btn" id="btn-launch-pvt">
-              <i class="fa-solid fa-play"></i> RUN PVT TEST
-            </button>
+            <!-- FULL TERMINAL LOGGER -->
+            <div id="terminal-logger-mount"></div>
           </div>
 
-          <!-- Active Prescribed Countermeasures -->
-          <section class="console-panel" aria-label="Prescribed Countermeasures">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-shield-halved"></i> Prescribed Countermeasures</h2>
-              <span class="header-tag">Act On Health</span>
-            </div>
-
-            <div class="panel-body">
-              <p style="font-size: 0.8125rem; color: var(--color-text-secondary); margin-bottom: 0.875rem;">
-                Autonomous clinical protocols prescribed for direct execution by the astronaut to arrest physiological&nbsp;degradation.
-              </p>
-
-              <div class="countermeasures-list" id="countermeasures-container">
-                <!-- Dynamically populated countermeasures -->
-              </div>
-            </div>
-          </section>
-        </section>
-      </div>
-
-      <!-- TIER 2: Deep Diagnostics, Clinical Logging & Risk Analytics -->
-      <div class="dashboard-secondary-row">
-        <!-- LEFT: Edge-AI Clinical Diagnostics & Crew Clinical Log -->
-        <div class="secondary-left">
-          <section class="console-panel" aria-label="Autonomous Clinical Diagnostics">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-microchip"></i> Autonomous Clinical Diagnostic Engine</h2>
-              <span class="header-tag">Edge AI Decision Model v4.2</span>
-            </div>
-
-            <div class="panel-body">
-              <div class="diagnostics-list" id="diagnostics-container">
-                <!-- Dynamically rendered diagnostic cards -->
-              </div>
-            </div>
-          </section>
-
-          <!-- Self-Reporting Symptom Logger Mount -->
-          <div id="symptom-logger-mount"></div>
+          <!-- RIGHT COLUMN: Biometric Anatomical Human Status Figure -->
+          <div class="dashboard-body-col">
+            <div id="body-status-mount"></div>
+          </div>
         </div>
+      </main>
 
-        <!-- RIGHT: NASA R.I.D.G.E Risk Radar & Daily Protocol Adherence -->
-        <div class="secondary-right">
-          <!-- NASA R.I.D.G.E Risk Radar -->
-          <section class="console-panel" aria-label="NASA Spaceflight Risk Index">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-satellite-dish"></i> NASA R.I.D.G.E. Spaceflight Risk Index</h2>
-              <span class="header-tag">HRP Standard</span>
-            </div>
-
-            <div class="panel-body">
-              <div class="ridge-risk-bars">
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[R] Radiation Exposure</span>
-                    <span id="risk-val-r">14% Career Cap</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill cyan" id="risk-fill-r" style="width: 14%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[I] Isolation & Stress Index</span>
-                    <span id="risk-val-i">18% Low</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill violet" id="risk-fill-i" style="width: 18%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[D] Distance / AI Autonomy Need</span>
-                    <span>95% High</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill cyan" style="width: 95%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[G] Microgravity Deconditioning</span>
-                    <span id="risk-val-g">22% Moderate</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill amber" id="risk-fill-g" style="width: 22%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>[E] Closed Environment Hazard</span>
-                    <span id="risk-val-e">12% Nominal</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill emerald" style="width: 12%;"></div></div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- Countermeasure Adherence & Weekly Progress -->
-          <section class="console-panel" aria-label="Daily Protocol Adherence">
-            <div class="panel-header">
-              <h2><i class="fa-solid fa-chart-column"></i> Daily Protocol Adherence</h2>
-              <span class="header-tag">Sol 142 Targets</span>
-            </div>
-
-            <div class="panel-body">
-              <div class="ridge-risk-bars" id="adherence-bars">
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>ARED Resistive Exercise (2.5 hr target)</span>
-                    <span id="adh-ared-val">100% (Logged)</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill emerald" id="adh-ared-bar" style="width: 100%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>LBNP Suction Session (45 min)</span>
-                    <span id="adh-lbnp-val">45% (In Progress)</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill cyan" id="adh-lbnp-bar" style="width: 45%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>Phototherapy / Circadian Light</span>
-                    <span id="adh-photo-val">Pending Evening</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill violet" id="adh-photo-bar" style="width: 20%;"></div></div>
-                </div>
-
-                <div class="risk-bar-row">
-                  <div class="risk-label-row">
-                    <span>Hydration Electrolyte Target (2.8L)</span>
-                    <span id="adh-hyd-val">2.2L / 2.8L</span>
-                  </div>
-                  <div class="risk-track"><div class="risk-fill cyan" style="width: 78%;"></div></div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
-      </div>
-    </main>
-
-      <!-- Footer -->
-      <footer class="mission-footer">
-        <div class="footer-left">
-          <span>NASA International Space Apps Challenge 2026</span>
-          <span>&bull;</span>
-          <span class="footer-tag">Challenge: Health Monitoring Software for Astronauts on Space Missions</span>
-        </div>
-        <div>
-          <span>Autonomous Edge-AI Decision System &bull; Offline Deep-Space Architecture</span>
-        </div>
-      </footer>
-
-      <!-- Modals Container -->
       <div id="modal-container"></div>
     `;
-  }
 
-  initEcg() {
-    const canvas = document.querySelector('#ecg-canvas');
-    if (canvas) {
-      this.ecg = new EcgOscilloscope(canvas, {
-        bpm: this.currentVitals.hr,
-        onBeat: (bpm) => {
-          sound.playHeartbeat();
-          const hrBox = document.querySelector('#box-hr');
-          if (hrBox) {
-            hrBox.classList.add('pulse-beat');
-            setTimeout(() => hrBox.classList.remove('pulse-beat'), 160);
-          }
-        }
-      });
-      this.ecg.start();
-    }
-  }
-
-  initHologram() {
-    const mount = document.querySelector('#body-hologram-mount');
-    if (mount) {
-      this.hologram = new BodyHologram(mount, (hotspot) => {
-        sound.playClick();
-        const detail = this.hotspotDetails[hotspot];
-        if (detail) {
-          const titleEl = document.querySelector('#hotspot-title');
-          const descEl = document.querySelector('#hotspot-desc');
-          if (titleEl) titleEl.textContent = detail.title;
-          if (descEl) descEl.textContent = detail.description;
-        }
-      });
-    }
-  }
-
-  initModals() {
-    const modalMount = document.querySelector('#modal-container');
-    this.cmModal = new CountermeasureModal(modalMount, (completedProtocol) => {
-      this.handleCountermeasureSuccess(completedProtocol);
+    document.querySelector('#btn-open-settings')?.addEventListener('click', () => {
+      this.settingsModal.open();
     });
 
-    this.reportModal = new ReportModal(modalMount);
+    // Alert & Desktop Notification toggle
+    const notifBtn = document.querySelector('#btn-toggle-notifs');
+    const notifText = document.querySelector('#notif-pill-text');
+    const notifDot = document.querySelector('#notif-pill-dot');
+
+    const updateNotifUi = () => {
+      const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+      if (notifBtn && notifText) {
+        if (perm === 'granted') {
+          notifBtn.classList.add('connected');
+          if (notifDot) notifDot.style.background = '#10b981';
+          notifText.textContent = 'ALERTS: ACTIVE';
+        } else if (perm === 'denied') {
+          notifBtn.classList.remove('connected');
+          if (notifDot) notifDot.style.background = '#ef4444';
+          notifText.textContent = 'ALERTS: BLOCKED';
+        } else {
+          notifBtn.classList.remove('connected');
+          if (notifDot) notifDot.style.background = '#f59e0b';
+          notifText.textContent = 'ENABLE ALERTS';
+        }
+      }
+    };
+
+    updateNotifUi();
+
+    window.testDangerNotification = () => {
+      const activeUser = this.userManager.getActiveUser();
+      const activeDev = this.deviceManager.getActiveDevice();
+      this.notificationDispatcher.dispatchDesktopNotification({
+        userName: activeUser?.name || 'Ahmed',
+        deviceName: activeDev?.customName || 'Orbita Watch',
+        vitals: { hr: 142, spo2: 88, stress: 85 },
+        reasonsStr: 'Critical SpO2 (88% < 90%) — Acute Hypoxia Risk'
+      });
+      this.notificationDispatcher.dispatchWatchHardwareAlert({
+        reasonsStr: 'Critical SpO2 (88% < 90%) — Hypoxia Risk',
+        vitals: { hr: 142, spo2: 88, stress: 85 }
+      });
+    };
+
+    notifBtn?.addEventListener('click', async () => {
+      const res = await this.notificationDispatcher.requestPermission();
+      updateNotifUi();
+      if (res === 'granted') {
+        const activeUser = this.userManager.getActiveUser();
+        const activeDev = this.deviceManager.getActiveDevice();
+        this.notificationDispatcher.dispatchDesktopNotification({
+          userName: activeUser?.name || 'Ahmed',
+          deviceName: activeDev?.customName || 'Orbita Watch',
+          vitals: { hr: 142, spo2: 88, stress: 85 },
+          reasonsStr: 'Critical SpO2 (88% < 90%) — Acute Hypoxia Risk'
+        });
+        this.notificationDispatcher.dispatchWatchHardwareAlert({
+          reasonsStr: 'Critical SpO2 (88% < 90%) — Hypoxia Risk',
+          vitals: { hr: 142, spo2: 88, stress: 85 }
+        });
+      }
+    });
+
+    this.renderUserAndDeviceSelectorPills();
+  }
+
+  renderUserAndDeviceSelectorPills() {
+    const mount = document.querySelector('#watch-selector-mount');
+    if (!mount) return;
+
+    const users = this.userManager.getAllUsers();
+    const activeUser = this.userManager.getActiveUser();
+    const ws = this.bleService?.watchState || {};
+
+    const pillsHtml = users.map((u) => {
+      const isUserActive = activeUser && activeUser.id === u.id;
+      const dev = u.assignedDeviceId ? this.deviceManager.devices.get(u.assignedDeviceId) : null;
+      const isConnected = dev && (dev.connected || (dev.sourceType === 'bridge' && Boolean(ws.connected)));
+      const hrVal = dev?.vitals?.hr;
+      const hrText = hrVal > 0 ? `${Math.round(hrVal)} BPM` : (isConnected ? 'SYNC' : (dev ? 'OFFLINE' : 'NO SENSOR'));
+      const battVal = ws.batt ?? dev?.activity?.batt;
+      const battText = battVal !== null && battVal !== undefined ? `${battVal}%` : '';
+
+      return `
+        <button class="watch-pill user-pill ${isUserActive ? 'active' : ''} ${isConnected ? 'connected' : ''}" data-user-id="${u.id}" title="${this.escapeHtml(u.role || 'Subject')} · ${dev ? dev.customName : 'Unassigned'}">
+          <span class="pill-dot"></span>
+          <i class="fa-solid fa-user"></i>
+          <strong>${this.escapeHtml(u.name)}:</strong>
+          <span>${hrText}${battText ? ' · ' + battText : ''}</span>
+        </button>
+      `;
+    }).join('');
+
+    mount.innerHTML = pillsHtml + `
+      <button class="watch-pill btn-header-add-user" id="btn-header-add-user" title="Register new user or astronaut profile">
+        <i class="fa-solid fa-user-plus"></i> ADD USER
+      </button>
+    `;
+
+    mount.querySelectorAll('.watch-pill[data-user-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.userManager.setActiveUser(btn.dataset.userId);
+        this.updateDisplay();
+      });
+    });
+
+    mount.querySelector('#btn-header-add-user')?.addEventListener('click', () => {
+      this.addUserModal.open();
+    });
+  }
+
+  initBodyStatusFigure() {
+    const mount = document.querySelector('#body-status-mount');
+    if (mount) {
+      this.bodyStatus = new BodyStatusFigure(mount);
+    }
+  }
+
+  initTerminalLogger() {
+    const mount = document.querySelector('#terminal-logger-mount');
+    if (mount) {
+      this.terminalLogger = new TerminalLogger(mount);
+    }
+  }
+
+  initTrendChart() {
+    const canvas = document.querySelector('#trend-canvas');
+    if (canvas) {
+      this.trendChart = new TrendHistoryChart(canvas, { maxPoints: 300 });
+      if (this.trendChart.channels.rr?.enabled) this.trendChart.toggleChannel('rr');
+      document.querySelectorAll('.trend-pill').forEach((pill) => {
+        pill.addEventListener('click', () => {
+          pill.classList.toggle('active', this.trendChart.toggleChannel(pill.dataset.channel));
+        });
+      });
+    }
+  }
+
+  initSessionRecorder() {
+    const recBtn = document.querySelector('#btn-session-record');
+    const recLabel = document.querySelector('#rec-btn-label');
+    const recIcon = document.querySelector('#rec-btn-icon');
+    const statusText = document.querySelector('#session-status-text');
+
+    this.sessionRecorder = new SessionRecorder((state) => {
+      if (statusText) {
+        statusText.textContent = state.isRecording
+          ? `Recording · ${state.durationSec}s · ${state.totalFrames} frames`
+          : state.totalFrames ? `${state.totalFrames} frames saved` : 'Not recording';
+      }
+      if (recBtn && recLabel && recIcon) {
+        recBtn.classList.toggle('active-recording', state.isRecording);
+        recLabel.textContent = state.isRecording ? 'STOP' : 'RECORD';
+        recIcon.className = state.isRecording ? 'fa-solid fa-stop' : 'fa-solid fa-circle-dot';
+      }
+    });
+
+    recBtn?.addEventListener('click', () => {
+      if (this.sessionRecorder.isRecording) this.sessionRecorder.stopRecording();
+      else this.sessionRecorder.startRecording();
+    });
+    document.querySelector('#btn-session-export-csv')?.addEventListener('click', () => {
+      if (this.sessionRecorder.getSampleCount() > 0) this.sessionRecorder.exportCSV();
+    });
+    document.querySelector('#btn-session-export-json')?.addEventListener('click', () => {
+      if (this.sessionRecorder.getSampleCount() > 0) this.sessionRecorder.exportJSON();
+    });
+  }
+
+  initSettingsModal() {
+    const mount = document.querySelector('#modal-container');
+    this.addUserModal = new AddUserModal(
+      mount,
+      this.userManager,
+      this.deviceManager,
+      this.bleService,
+      (newUser) => this.handleUserCreated(newUser)
+    );
+    this.settingsModal = new DeviceSettingsModal(
+      mount,
+      this.deviceManager,
+      this.userManager,
+      this.bleService,
+      () => this.handleDeviceManagerUpdate(),
+      () => this.addUserModal.open()
+    );
+  }
+
+  handleUserCreated(newUser) {
+    if (this.terminalLogger && newUser) {
+      this.terminalLogger.logEntry({
+        deviceName: newUser.name,
+        eventMessage: `NEW SUBJECT REGISTERED: ${newUser.name} (${newUser.role})`
+      });
+    }
+    this.handleDeviceManagerUpdate();
   }
 
   initHardware() {
-    const modalMount = document.querySelector('#modal-container');
-
-    const handleBiosensorData = (data) => {
-      // Forward to HardwareModal so live metrics update in real-time
-      if (this.hardwareModal) {
-        this.hardwareModal.updateTelemetry(data);
-      }
+    const handleData = (data) => {
+      const activeDev = this.deviceManager.getActiveDevice();
+      if (!activeDev) return;
 
       if (data.finger !== undefined) {
-        this.isOffWrist = !data.finger;
-        if (this.ecg) {
-          this.ecg.setOffWrist(this.isOffWrist);
-        }
+        activeDev.isOffWrist = !data.finger;
+        this.isOffWrist = activeDev.isOffWrist;
       }
+
+      // Update activity
+      if (data.steps !== undefined && data.steps !== null) activeDev.activity.steps = data.steps;
+      if (data.distanceMeters !== undefined && data.distanceMeters !== null) activeDev.activity.distanceMeters = data.distanceMeters;
+      if (data.caloriesKcal !== undefined && data.caloriesKcal !== null) activeDev.activity.caloriesKcal = data.caloriesKcal;
+      if (data.cadenceSpm !== undefined && data.cadenceSpm !== null) activeDev.activity.cadenceSpm = data.cadenceSpm;
+      if (data.batt !== undefined && data.batt !== null) activeDev.activity.batt = data.batt;
+      activeDev.connected = true;
+
+      const v = activeDev.vitals;
 
       if (this.isOffWrist) {
-        // True off-wrist state: no fake data, no decay, no synthetic numbers
-        this.currentVitals.hr = 0;
-        this.currentVitals.spo2 = 0;
-        this.currentVitals.hrv = 0;
-        if (data.temp && data.temp > 0) {
-          this.currentVitals.temp = data.temp;
-        }
-        if (data.batt) {
-          this.currentVitals.battery = data.batt;
-        }
+        Object.assign(v, EMPTY_VITALS());
+        physiologicalEngine.reset();
       } else {
-        // Skin contact confirmed - use real physical sensor data
-        this.isOffWrist = false;
-        if (this.ecg) {
-          this.ecg.setOffWrist(false);
+        if (data.hr > 0) v.hr = data.hr; else if (data.hr === 0) v.hr = null;
+        if (data.hrv > 0) v.hrv = data.hrv;
+        if (data.spo2 > 0) {
+          v.spo2 = data.spo2;
+          if (data.spo2Timestamp) v.spo2Timestamp = data.spo2Timestamp;
+        }
+        if (data.stress > 0) {
+          v.stress = Math.round(data.stress);
+          if (data.stressTimestamp) v.stressTimestamp = data.stressTimestamp;
+          if (data.stressMode) v.stressMode = data.stressMode;
+        }
+        if (data.rr > 0) v.respRate = data.rr;
+        if (data.temp > 0) v.temp = data.temp;
+        if (data.bpSys > 0) { v.bpSys = data.bpSys; v.bpDia = data.bpDia || null; }
+
+        // Continuous physiological derivation
+        const est = v.hr > 0
+          ? physiologicalEngine.derive({ hr: v.hr, stress: v.stress, caloriesKcal: activeDev.activity.caloriesKcal })
+          : null;
+
+        if (est) {
+          if (!(data.rr > 0)) v.respRate = est.respRate;
+          if (!(data.temp > 0)) v.temp = est.temp;
+          if (!(data.bpSys > 0)) { v.bpSys = est.bpSys; v.bpDia = est.bpDia; }
+          v.map = est.map;
+        } else if (!(v.hr > 0)) {
+          v.respRate = null; v.temp = null; v.bpSys = null; v.bpDia = null; v.map = null;
         }
 
-        if (data.hr && data.hr > 0) {
-          this.currentVitals.hr = data.hr;
-          if (this.ecg) {
-            this.ecg.setBpm(this.currentVitals.hr);
-          }
-        }
-        if (data.hrv && data.hrv > 0) {
-          this.currentVitals.hrv = data.hrv;
-        }
-        if (data.spo2 && data.spo2 > 0) {
-          this.currentVitals.spo2 = data.spo2;
-        }
-        if (data.temp && data.temp > 0) {
-          this.currentVitals.temp = data.temp;
-        }
-        if (data.bpSys && data.bpSys > 0) {
-          this.currentVitals.bpSys = data.bpSys;
-          this.currentVitals.bpDia = data.bpDia || 80;
-        }
-        if (data.icp && data.icp > 0) {
-          this.currentVitals.icp = data.icp;
-        }
-        if (data.batt) {
-          this.currentVitals.battery = data.batt;
+        if (this.trendChart) {
+          this.trendChart.appendPoint({ ...v, respRate: null });
         }
       }
 
-      if (this.hardwareModal && data.hr) {
-        this.hardwareModal.updateRppgBpm(data.hr);
+      if (this.sessionRecorder?.isRecording) {
+        this.sessionRecorder.recordFrame(v, activeDev.customName, this.isOffWrist);
       }
 
-      this.updateVitalsDisplay();
+      // Health evaluation
+      const healthEval = this.deviceManager.evaluateHealth(v);
+
+      const activeUser = this.userManager.getActiveUser();
+      const userName = activeUser ? activeUser.name : 'SUBJECT';
+
+      // Emergency Dispatcher (Watch Haptic Buzz, Desktop Notification, Audio Alarm, Screen Banner)
+      this.notificationDispatcher.processTelemetry({
+        userName,
+        deviceName: activeDev.customName,
+        vitals: v,
+        healthEval,
+        isOffWrist: this.isOffWrist
+      });
+
+      // Terminal logger streaming (throttled to ~1.2s or on status change)
+      const now = Date.now();
+      if (now - this.lastLogThrottle >= 1200 || healthEval.level === 'danger') {
+        this.lastLogThrottle = now;
+        if (this.terminalLogger) {
+          this.terminalLogger.logEntry({
+            deviceName: `${userName} // ${activeDev.customName}`,
+            vitals: v,
+            activity: activeDev.activity,
+            healthEval,
+            isOffWrist: this.isOffWrist
+          });
+        }
+      }
+
+      // Update anatomical body status map
+      if (this.bodyStatus) {
+        this.bodyStatus.update(v, this.isOffWrist, activeDev, activeUser);
+      }
+
+      this.updateDisplay();
     };
 
-    const handleStatusChange = () => {};
-
-    this.bleService = new BleService(handleBiosensorData, handleStatusChange);
-    this.serialService = new SerialService(
-      handleBiosensorData,
-      handleStatusChange,
-      (line) => {
-        if (this.hardwareModal) {
-          this.hardwareModal.logSerial(line);
+    const handleStatus = (status) => {
+      if (status && status.state === 'connected') {
+        const activeDev = this.deviceManager.getActiveDevice();
+        if (activeDev) {
+          activeDev.connected = true;
+          if (status.deviceName) activeDev.defaultName = status.deviceName;
         }
+        this.activeHardwareSource = status.deviceName || 'Orbita Watch';
+        this.renderUserAndDeviceSelectorPills();
+        this.updateDisplay();
       }
-    );
-    this.rppgService = new RppgService(handleBiosensorData, handleStatusChange);
+    };
 
-    this.hardwareModal = new HardwareModal(
-      modalMount,
-      this.bleService,
-      this.serialService,
-      this.rppgService,
-      (sourceName) => {
-        this.handleSourceChanged(sourceName);
-      }
-    );
-  }
+    this.bleService = new BleService(handleData, handleStatus);
+    this.notificationDispatcher.bleService = this.bleService;
+    this.serialService = new SerialService(handleData, handleStatus);
+    this.rppgService = new RppgService(handleData, handleStatus);
 
-  handleSourceChanged(sourceName) {
-    this.activeHardwareSource = sourceName.includes('Simulated') ? null : sourceName;
-    const label = document.querySelector('#hardware-btn-label');
-    const feedSource = document.querySelector('#sensor-feed-source');
-    const hwBtn = document.querySelector('#btn-open-hardware');
-
-    if (!this.activeHardwareSource) {
-      this.isOffWrist = false;
-      this.currentVitals = { ...this.activeCrew.baseVitals };
-      if (this.ecg) {
-        this.ecg.setOffWrist(false);
-        this.ecg.setBpm(this.currentVitals.hr);
-      }
-    }
-
-    if (label) {
-      label.textContent = this.activeHardwareSource ? `Hardware: ${sourceName}` : 'ESP32-C3 Band: Setup & Link';
-    }
-    if (feedSource) {
-      feedSource.textContent = sourceName;
-      if (this.activeHardwareSource) {
-        feedSource.classList.add('stream-hardware-active');
-      } else {
-        feedSource.classList.remove('stream-hardware-active');
-      }
-    }
-    if (hwBtn) {
-      if (this.activeHardwareSource) {
-        hwBtn.classList.add('active-hardware');
-      } else {
-        hwBtn.classList.remove('active-hardware');
-      }
-    }
-    this.updateVitalsDisplay();
-  }
-
-  initSymptomLogger() {
-    const mount = document.querySelector('#symptom-logger-mount');
-    if (mount) {
-      this.symptomLogger = new SymptomLogger(mount, (newEntry) => {
-        this.symptomLogs.unshift(newEntry);
-        if (newEntry.severity >= 3) {
-          this.currentVitals.hrv = Math.max(30, this.currentVitals.hrv - 6);
-          this.currentVitals.hr = Math.min(110, this.currentVitals.hr + 4);
-          this.updateVitalsDisplay();
+    this.bleService.autoConnectBridge().then((linked) => {
+      if (linked) {
+        const ws = this.bleService.watchState;
+        const activeDev = this.deviceManager.getActiveDevice();
+        if (activeDev) {
+          activeDev.connected = true;
+          if (ws.deviceName) activeDev.defaultName = ws.deviceName;
+          if (ws.address) activeDev.address = ws.address;
         }
-      });
-    }
-  }
-
-  attachEventListeners() {
-    // Scenario selector
-    const scenarioSelect = document.querySelector('#sim-scenario-select');
-    if (scenarioSelect) {
-      scenarioSelect.addEventListener('change', (e) => {
-        sound.playClick();
-        this.setScenario(e.target.value);
-      });
-    }
-
-    // Crew switcher
-    const elenaBtn = document.querySelector('#btn-crew-elena');
-    const marcusBtn = document.querySelector('#btn-crew-marcus');
-
-    if (elenaBtn && marcusBtn) {
-      elenaBtn.addEventListener('click', () => {
-        sound.playClick();
-        elenaBtn.classList.add('active');
-        marcusBtn.classList.remove('active');
-        this.switchCrew(this.crewMembers[0]);
-      });
-
-      marcusBtn.addEventListener('click', () => {
-        sound.playClick();
-        marcusBtn.classList.add('active');
-        elenaBtn.classList.remove('active');
-        this.switchCrew(this.crewMembers[1]);
-      });
-    }
-
-    // Audio Mute toggle
-    const soundBtn = document.querySelector('#btn-toggle-sound');
-    if (soundBtn) {
-      soundBtn.addEventListener('click', () => {
-        const isMuted = sound.toggleMute();
-        const icon = document.querySelector('#sound-icon');
-        const label = document.querySelector('#sound-label');
-        if (icon && label) {
-          icon.className = isMuted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
-          label.textContent = isMuted ? 'Audio: Muted' : 'Audio: Active';
-        }
-      });
-    }
-
-    // PVT Launch button
-    const pvtBtn = document.querySelector('#btn-launch-pvt');
-    if (pvtBtn) {
-      pvtBtn.addEventListener('click', () => {
-        sound.playClick();
-        const mount = document.querySelector('#modal-container');
-        this.pvtModal = new PvtTestModal(mount, (results) => {
-          this.handlePvtCompletion(results);
-        });
-      });
-    }
-
-    // Hardware Biosensor Modal launcher
-    const hwBtn = document.querySelector('#btn-open-hardware');
-    if (hwBtn) {
-      hwBtn.addEventListener('click', () => {
-        this.hardwareModal.open();
-      });
-    }
-
-    // NASA Report Generator button
-    const reportBtn = document.querySelector('#btn-open-report');
-    if (reportBtn) {
-      reportBtn.addEventListener('click', () => {
-        this.reportModal.open(
-          this.activeCrew,
-          this.currentScenario,
-          this.currentVitals,
-          this.symptomLogger ? this.symptomLogger.logs : []
-        );
-      });
-    }
-  }
-
-  switchCrew(crew) {
-    this.activeCrew = crew;
-    document.querySelector('#astronaut-img').src = crew.photo;
-    document.querySelector('#astronaut-img').alt = crew.name;
-    document.querySelector('#astronaut-name').textContent = crew.name;
-    document.querySelector('#astronaut-role').textContent = crew.role;
-    document.querySelector('#astronaut-callsign').textContent = `${crew.callsign} · ${crew.bloodType}`;
-    document.querySelector('#meta-zero-g').textContent = `${crew.daysInMicrogravity} Sols`;
-    document.querySelector('#meta-mass-delta').textContent = crew.massLossSinceLaunch;
-    document.querySelector('#meta-vo2').textContent = crew.baselineVO2Max;
-    document.querySelector('#meta-eva').textContent = crew.evaHoursTotal;
-
-    this.currentVitals = { ...crew.baseVitals };
-    this.applyScenario(this.currentScenario);
-  }
-
-  setScenario(scenarioKey) {
-    this.currentScenarioKey = scenarioKey;
-    this.currentScenario = MISSION_SCENARIOS[scenarioKey] || MISSION_SCENARIOS.nominal;
-    this.applyScenario(this.currentScenario);
-  }
-
-  applyScenario(sc) {
-    const bannerContainer = document.querySelector('#alert-banner-container');
-    const radFluxHud = document.querySelector('#hud-rad-flux');
-    const ppco2Hud = document.querySelector('#hud-ppco2');
-    const pulseDot = document.querySelector('#env-pulse-dot');
-
-    if (sc.severity === 'critical') {
-      sound.playAlarm();
-      if (pulseDot) {
-        pulseDot.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> SPE CRITICAL';
-        pulseDot.classList.add('alert');
+        this.activeHardwareSource = ws.deviceName || 'Orbita Watch';
+        this.renderUserAndDeviceSelectorPills();
+        this.updateDisplay();
       }
-      bannerContainer.innerHTML = `
-        <div class="critical-alert-banner">
-          <div class="alert-content">
-            <span class="alert-badge"><i class="fa-solid fa-radiation"></i> MISSION CRITICAL</span>
-            <span class="alert-msg">${sc.description}</span>
-          </div>
-          <button class="alert-cta-btn" id="btn-banner-action"><i class="fa-solid fa-shield-halved"></i> EXECUTE SHELTER PROTOCOL</button>
-        </div>
-      `;
-      const bannerAction = bannerContainer.querySelector('#btn-banner-action');
-      if (bannerAction) {
-        bannerAction.addEventListener('click', () => {
-          this.cmModal.open(sc.countermeasures[0]);
-        });
-      }
-    } else {
-      if (pulseDot) {
-        pulseDot.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> AUTONOMOUS';
-        pulseDot.classList.remove('alert');
-      }
-      bannerContainer.innerHTML = '';
-    }
-
-    if (radFluxHud) radFluxHud.textContent = `${sc.radiationFlux} mSv/d`;
-    if (ppco2Hud) ppco2Hud.textContent = `${sc.environmental.ppco2} mmHg`;
-
-    this.currentVitals.hr = sc.vitalsDelta.hr;
-    this.currentVitals.bpSys = sc.vitalsDelta.bpSys;
-    this.currentVitals.bpDia = sc.vitalsDelta.bpDia;
-    this.currentVitals.spo2 = sc.vitalsDelta.spo2;
-    this.currentVitals.icp = sc.vitalsDelta.icp;
-    this.currentVitals.hrv = sc.vitalsDelta.hrv;
-    this.currentVitals.temp = sc.vitalsDelta.temp;
-
-    if (this.ecg) {
-      const stress = sc.severity === 'critical' ? 0.8 : (sc.severity === 'warning' ? 0.4 : 0);
-      this.ecg.setBpm(this.currentVitals.hr, stress);
-    }
-
-    this.renderDiagnostics(sc.diagnostics);
-    this.renderCountermeasures(sc.countermeasures);
-    this.updateRiskRadar(sc);
-    this.updateVitalsDisplay();
-  }
-
-  renderDiagnostics(diags) {
-    const mount = document.querySelector('#diagnostics-container');
-    if (!mount) return;
-
-    mount.innerHTML = diags.map(d => `
-      <div class="diagnostic-card ${d.severity}">
-        <div class="diag-header">
-          <h3 class="diag-title">${d.title}</h3>
-          <span class="diag-badge ${d.severity}">${d.severity}</span>
-        </div>
-        <div class="diag-body">${d.summary}</div>
-        <div class="diag-action-rec">
-          <strong>Protocol Guidance:</strong> ${d.action}
-        </div>
-      </div>
-    `).join('');
-  }
-
-  renderCountermeasures(cms) {
-    const mount = document.querySelector('#countermeasures-container');
-    if (!mount) return;
-
-    mount.innerHTML = cms.map(cm => `
-      <div class="countermeasure-item" id="cm-${cm.id}">
-        <div class="cm-info">
-          <h3 class="cm-title"><i class="${cm.icon}"></i> ${cm.title}</h3>
-          <div class="cm-meta">
-            <span><i class="fa-solid fa-stopwatch"></i> ${cm.duration}</span>
-            <span>&bull;</span>
-            <span style="color: ${cm.urgency === 'immediate' ? 'var(--color-crimson-text)' : 'var(--color-text-cyan)'}; text-transform: uppercase;">
-              ${cm.urgency}
-            </span>
-          </div>
-        </div>
-        <button class="cm-act-btn ${cm.urgency}" data-cmid="${cm.id}">
-          <span>ACT NOW</span>
-        </button>
-      </div>
-    `).join('');
-
-    mount.querySelectorAll('.cm-act-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.cmid;
-        const cm = cms.find(c => c.id === id);
-        if (cm) {
-          this.cmModal.open(cm);
-        }
-      });
     });
   }
 
-  updateRiskRadar(sc) {
-    const rFill = document.querySelector('#risk-fill-r');
-    const rVal = document.querySelector('#risk-val-r');
-    const iFill = document.querySelector('#risk-fill-i');
-    const iVal = document.querySelector('#risk-val-i');
-    const gFill = document.querySelector('#risk-fill-g');
-    const gVal = document.querySelector('#risk-val-g');
-
-    if (sc.id === 'solar_particle_event') {
-      if (rFill) { rFill.style.width = '88%'; rFill.className = 'risk-fill crimson'; }
-      if (rVal) rVal.textContent = '88% CRITICAL FLUX';
-    } else {
-      if (rFill) { rFill.style.width = '14%'; rFill.className = 'risk-fill cyan'; }
-      if (rVal) rVal.textContent = '14% Career Cap';
-    }
-
-    if (sc.id === 'cognitive_exhaustion') {
-      if (iFill) { iFill.style.width = '78%'; iFill.className = 'risk-fill amber'; }
-      if (iVal) iVal.textContent = '78% High Fatigue';
-    } else {
-      if (iFill) { iFill.style.width = '18%'; iFill.className = 'risk-fill violet'; }
-      if (iVal) iVal.textContent = '18% Low';
-    }
-
-    if (sc.id === 'sans_fluid_shift' || sc.id === 'hypercalciuria_bone') {
-      if (gFill) { gFill.style.width = '68%'; gFill.className = 'risk-fill amber'; }
-      if (gVal) gVal.textContent = '68% Elevated Shift';
-    } else {
-      if (gFill) { gFill.style.width = '22%'; gFill.className = 'risk-fill amber'; }
-      if (gVal) gVal.textContent = '22% Moderate';
-    }
+  handleDeviceManagerUpdate() {
+    this.renderUserAndDeviceSelectorPills();
+    this.updateDisplay();
   }
 
-  updateVitalsDisplay() {
-    const hrEl = document.querySelector('#val-hr');
-    const bpEl = document.querySelector('#val-bp');
-    const spo2El = document.querySelector('#val-spo2');
-    const icpEl = document.querySelector('#val-icp');
-    const hrvEl = document.querySelector('#val-hrv');
-    const tempEl = document.querySelector('#val-temp');
+  updateDisplay() {
+    const activeUser = this.userManager.getActiveUser();
+    const activeDev = this.deviceManager.getActiveDevice();
+    const connected = Boolean(activeDev && activeDev.connected);
+    const emptyNote = !connected ? 'No device' : this.isOffWrist ? 'Off wrist' : 'Waiting for data';
 
-    const boxHr = document.querySelector('#box-hr');
-    const boxIcp = document.querySelector('#box-icp');
-    const boxHrv = document.querySelector('#box-hrv');
-
-    if (this.activeHardwareSource && this.isOffWrist) {
-      if (hrEl) hrEl.textContent = '--';
-      if (bpEl) bpEl.textContent = '--/--';
-      if (spo2El) spo2El.textContent = '--';
-      if (hrvEl) hrvEl.textContent = '--';
-      if (tempEl) tempEl.textContent = this.currentVitals.temp ? this.currentVitals.temp.toFixed(1) : '--';
-      if (icpEl) icpEl.textContent = this.currentVitals.icp ? this.currentVitals.icp.toFixed(1) : '--';
-
-      if (boxHr) boxHr.className = 'vital-box off-wrist-state';
-      if (boxHrv) boxHrv.className = 'vital-box off-wrist-state';
-      return;
+    // Update active watch tag
+    const tag = document.querySelector('#active-watch-tag');
+    if (tag && activeDev) {
+      const userPart = activeUser ? `👤 ${activeUser.name.toUpperCase()} · ` : '';
+      tag.textContent = `[ ${userPart}${activeDev.customName.toUpperCase()} · ${connected ? 'LIVE' : 'OFFLINE'} ]`;
     }
 
-    if (hrEl) hrEl.textContent = Math.round(this.currentVitals.hr);
-    if (bpEl) bpEl.textContent = `${Math.round(this.currentVitals.bpSys)}/${Math.round(this.currentVitals.bpDia)}`;
-    if (spo2El) spo2El.textContent = this.currentVitals.spo2.toFixed(1);
-    if (icpEl) icpEl.textContent = this.currentVitals.icp.toFixed(1);
-    if (hrvEl) hrvEl.textContent = Math.round(this.currentVitals.hrv);
-    if (tempEl) tempEl.textContent = this.currentVitals.temp.toFixed(1);
+    const s = activeDev ? activeDev.vitals : EMPTY_VITALS();
 
-    if (boxHr) {
-      boxHr.className = this.currentVitals.hr > 90 ? 'vital-box critical-state' : (this.currentVitals.hr > 80 ? 'vital-box warning-state' : 'vital-box');
-    }
-    if (boxIcp) {
-      boxIcp.className = this.currentVitals.icp > 18 ? 'vital-box critical-state' : (this.currentVitals.icp > 15 ? 'vital-box warning-state' : 'vital-box');
-    }
-    if (boxHrv) {
-      boxHrv.className = this.currentVitals.hrv < 40 ? 'vital-box warning-state' : 'vital-box';
-    }
-  }
+    for (const def of VITALS_DEF) {
+      const valEl = document.querySelector(`#val-${def.id}`);
+      const subEl = document.querySelector(`#sub-${def.id}`);
+      const boxEl = document.querySelector(`#box-${def.id}`);
+      if (!valEl || !subEl || !boxEl) continue;
 
-  handleCountermeasureSuccess(protocol) {
-    const item = document.querySelector(`#cm-${protocol.id}`);
-    if (item) {
-      const btn = item.querySelector('.cm-act-btn');
-      if (btn) {
-        btn.innerHTML = '<i class="fa-solid fa-check"></i> COMPLETED';
-        btn.style.background = 'var(--color-emerald)';
-        btn.style.borderColor = 'var(--color-emerald)';
-        btn.style.color = '#ffffff';
-        btn.disabled = true;
-      }
-    }
+      let text = '--';
+      let note = emptyNote;
+      let level = '';
 
-    if (protocol.id === 'lbnp' || protocol.id === 'head_elevate') {
-      this.currentVitals.icp = Math.max(12.5, this.currentVitals.icp - 4.5);
-      this.currentVitals.hrv = Math.min(65, this.currentVitals.hrv + 10);
-      const adhBar = document.querySelector('#adh-lbnp-bar');
-      const adhVal = document.querySelector('#adh-lbnp-val');
-      if (adhBar) adhBar.style.width = '100%';
-      if (adhVal) adhVal.textContent = '100% (Completed)';
-    } else if (protocol.id === 'shelter' || protocol.id === 'radioprotectant') {
-      this.currentVitals.hr = Math.max(72, this.currentVitals.hr - 15);
-      this.currentVitals.hrv = Math.min(55, this.currentVitals.hrv + 12);
-    } else if (protocol.id === 'ared' || protocol.id === 'ared_heavy') {
-      const adhBar = document.querySelector('#adh-ared-bar');
-      const adhVal = document.querySelector('#adh-ared-val');
-      if (adhBar) adhBar.style.width = '100%';
-      if (adhVal) adhVal.textContent = '100% (Logged)';
-    }
-
-    this.updateVitalsDisplay();
-  }
-
-  handlePvtCompletion(results) {
-    const pvLauncher = document.querySelector('.pvt-launcher-text p');
-    if (pvLauncher) {
-      pvLauncher.textContent = `Recent PVT: Mean RT ${results.meanRt} ms (${results.lapses} lapses)`;
-    }
-
-    if (results.lapses > 1 || results.meanRt > 400) {
-      this.currentVitals.hrv = Math.max(30, this.currentVitals.hrv - 5);
-      this.updateVitalsDisplay();
-    }
-  }
-
-  startTelemetryLoop() {
-    setInterval(() => {
-      // If a real physical hardware band is connected, zero simulated jitter or decay
-      if (this.activeHardwareSource) {
-        return;
+      if (connected && !this.isOffWrist) {
+        if (def.id === 'bp') {
+          if (s.bpSys > 0 && s.bpDia > 0) {
+            text = `${Math.round(s.bpSys)}/${Math.round(s.bpDia)}`;
+            note = 'Estimated from HR + stress';
+          }
+        } else if (s[def.id] > 0) {
+          const v = s[def.id];
+          text = def.fmt ? def.fmt(v) : String(v);
+          note = def.src === 'est' ? 'Estimated model' : def.note(v, s);
+          level = def.level ? def.level(v) : '';
+        }
       }
 
-      const hrJitter = (Math.random() - 0.5) * 1.5;
-      const bpJitter = (Math.random() - 0.5) * 1.0;
-      const spo2Jitter = (Math.random() - 0.5) * 0.1;
+      valEl.textContent = text;
+      subEl.textContent = note;
+      boxEl.className = `vital-box ${text === '--' ? 'unmeasured-state' : level || (def.src === 'est' ? 'derived-state' : '')}`.trim();
+    }
 
-      this.currentVitals.hr = Math.max(45, Math.min(160, this.currentVitals.hr + hrJitter * 0.2));
-      this.currentVitals.bpSys = Math.max(90, Math.min(180, this.currentVitals.bpSys + bpJitter * 0.1));
-      this.currentVitals.spo2 = Math.max(94.0, Math.min(100.0, this.currentVitals.spo2 + spo2Jitter * 0.05));
+    // Activity boxes
+    const act = activeDev ? activeDev.activity : {};
+    for (const [k, v] of Object.entries(act)) {
+      const el = document.querySelector(`#act-${k}`);
+      if (el) el.textContent = connected && v !== null && v !== undefined ? v : '--';
+    }
 
-      if (this.ecg) {
-        this.ecg.setBpm(this.currentVitals.hr);
-      }
-
-      this.updateVitalsDisplay();
-    }, 1800);
+    this.renderUserAndDeviceSelectorPills();
   }
 
-  startMetClock() {
-    const clockEl = document.querySelector('#met-clock');
-    if (!clockEl) return;
-
-    setInterval(() => {
-      const now = new Date();
-      const h = String(now.getUTCHours()).padStart(2, '0');
-      const m = String(now.getUTCMinutes()).padStart(2, '0');
-      const s = String(now.getUTCSeconds()).padStart(2, '0');
-      clockEl.textContent = `Sol ${this.activeCrew.missionSol} · ${h}:${m}:${s} UTC`;
-    }, 1000);
+  escapeHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 }
 

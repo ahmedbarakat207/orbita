@@ -1,0 +1,70 @@
+# Smartwatch Assembly Materials
+newmtl material_case
+Kd 0.35 0.40 0.45
+Ka 0.1 0.1 0.1
+Ks 0.5 0.5 0.5
+d 0.35
+Ns 40
+
+newmtl material_oled
+Kd 0.05 0.40 0.85
+Ka 0.0 0.1 0.3
+Ks 0.9 0.9 0.9
+d 1.0
+Ns 100
+
+newmtl material_esp32
+Kd 0.15 0.45 0.75
+Ka 0.1 0.2 0.3
+Ks 0.7 0.7 0.7
+d 1.0
+Ns 60
+
+newmtl material_battery
+Kd 0.85 0.85 0.88
+Ka 0.3 0.3 0.3
+Ks 0.9 0.9 0.9
+d 1.0
+Ns 90
+
+newmtl material_tp4056
+Kd 0.10 0.55 0.80
+Ka 0.1 0.2 0.4
+Ks 0.5 0.5 0.5
+d 1.0
+Ns 40
+
+newmtl material_mpu6050
+Kd 0.08 0.50 0.88
+Ka 0.1 0.2 0.4
+Ks 0.6 0.6 0.6
+d 1.0
+Ns 50
+
+newmtl material_max30100
+Kd 0.55 0.15 0.75
+Ka 0.2 0.0 0.3
+Ks 0.6 0.6 0.6
+d 1.0
+Ns 50
+
+newmtl material_motor
+Kd 0.85 0.65 0.15
+Ka 0.3 0.2 0.0
+Ks 0.9 0.8 0.5
+d 1.0
+Ns 90
+
+newmtl material_driver
+Kd 0.20 0.20 0.22
+Ka 0.1 0.1 0.1
+Ks 0.4 0.4 0.4
+d 1.0
+Ns 30
+
+newmtl material_cables
+Kd 0.95 0.25 0.15
+Ka 0.2 0.1 0.1
+Ks 0.5 0.5 0.5
+d 1.0
+Ns 30

@@ -99,6 +99,30 @@ class SoundService {
     } catch (e) {}
   }
 
+  playWarning() {
+    if (this.muted) return;
+    this.init();
+    if (!this.audioCtx) return;
+
+    try {
+      const now = this.audioCtx.currentTime;
+      [0, 0.18].forEach((offset) => {
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(659.25, now + offset); // E5
+        osc.frequency.exponentialRampToValueAtTime(523.25, now + offset + 0.12); // C5
+        gain.gain.setValueAtTime(0.09, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.12);
+
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.12);
+      });
+    } catch (e) {}
+  }
+
   playSuccess() {
     if (this.muted) return;
     this.init();

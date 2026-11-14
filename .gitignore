@@ -22,3 +22,21 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python virtualenv
+tools/.venv/
+tools/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Large binary blobs
+Archive.zip
+build_packed.bin
+tools/watchface_builder/doom1.wad
+tools/watchface_builder/build/
+tools/watchface_builder/doom_assets/
+
+# Compiled watchface (generated artifact — run generate_aura_watchface.py to rebuild)
+# Keep the final .bin and preview in public/ for download
+

@@ -1,7 +1,7 @@
 /* =========================================================================================
    AURA-OS | Deep Space Astronaut Biomedical Health & Telemetry Band
    NASA International Space Apps Challenge 2026
-   Hardware Target: ESP32-C3 (RISC-V) with MAX30102 / MAX30100 & 0.96" SSD1306 OLED
+   Hardware Target: ESP32-C3 (RISC-V) with MAX30102 & 0.96" SSD1306 OLED
    Communication: USB Serial (115200 baud JSON stream) + Bluetooth Low Energy (BLE GATT)
    ========================================================================================= */
 
@@ -12,42 +12,42 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include "esp_sleep.h"
 
 // ==========================================
 // 1. PIN CONFIGURATION & HARDWARE ASSIGNMENT
 // ==========================================
 // Default I2C pins for ESP32-C3 SuperMini & DevKit:
 // (If using Seeed Xiao ESP32-C3: SDA = 6, SCL = 7)
-#define I2C_SDA_PIN      8
-#define I2C_SCL_PIN      9
+#define I2C_SDA_PIN       8
+#define I2C_SCL_PIN       9
 
-// Battery voltage ADC sense pin (connect via 100k/100k voltage divider to LiPo 3.7V)
-#define BATTERY_ADC_PIN  0
+// Battery voltage ADC sense pin (100k+100k voltage divider to LiPo 3.7V)
+#define BATTERY_ADC_PIN   0
+
+// Vibration motor PWM/GPIO pin (connect via NPN transistor or MOSFET gate)
+#define VIBRATION_PIN     4
 
 // OLED Display parameters
-#define SCREEN_WIDTH     128
-#define SCREEN_HEIGHT    64
-#define OLED_RESET       -1
-#define OLED_I2C_ADDR    0x3C
+#define SCREEN_WIDTH      128
+#define SCREEN_HEIGHT     64
+#define OLED_RESET        -1
+#define OLED_I2C_ADDR     0x3C
 
 // MAX30102 Biosensor I2C address
-#define MAX30102_ADDR    0x57
+#define MAX30102_ADDR     0x57
 
-// Thresholds for true finger / skin contact detection
-#define IR_FINGER_THRESHOLD 35000L  // Minimum IR raw count for valid tissue contact
+// Minimum IR raw count for valid tissue contact
+#define IR_FINGER_THRESHOLD 35000L
 
 // ==========================================
 // 2. BLE GATT UUID DEFINITIONS
 // ==========================================
 #define DEVICE_NAME              "AURA-BAND-C3"
-// Standard Bluetooth SIG GATT Services
 #define BLE_SERVICE_HR           BLEUUID((uint16_t)0x180D)
 #define BLE_CHAR_HR_MEASURE      BLEUUID((uint16_t)0x2A37)
-
 #define BLE_SERVICE_BATTERY      BLEUUID((uint16_t)0x180F)
 #define BLE_CHAR_BATTERY_LEVEL   BLEUUID((uint16_t)0x2A19)
-
-// Custom AURA-OS Telemetry Service (Full JSON Packet Stream)
 #define AURA_SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define AURA_CHAR_TELEMETRY_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
@@ -65,16 +65,20 @@ bool bleClientConnected = false;
 bool fingerDetected = false;
 float currentHeartRate = 0.0;
 float currentSpO2 = 0.0;
-float currentTempC = 36.6;
-int currentHrvSdnn = 0;
-int batteryPercentage = 95;
+float currentTempC = 0.0;
+int   currentHrvSdnn = 0;
+float currentPnn50 = 0.0;
+float currentRespRate = 0.0;
+int   batteryPercentage = 95;
 
-// Signal processing variables
+// Raw optical channels
 uint32_t rawRed = 0;
-uint32_t rawIR = 0;
-float dcFilterIR = 0.0;
+uint32_t rawIR  = 0;
+
+// DC-blocking filter state
+float dcFilterIR  = 0.0;
 float dcFilterRed = 0.0;
-float acIR = 0.0;
+float acIR  = 0.0;
 float acRed = 0.0;
 
 // Peak detection for Heart Rate (IBI in ms)
@@ -82,46 +86,62 @@ unsigned long lastBeatTimestamp = 0;
 float recentIbis[4] = {800, 800, 800, 800};
 uint8_t ibiIndex = 0;
 
-// HRV (SDNN) rolling window (last 10 valid RR intervals)
+// HRV (SDNN) rolling window - last 10 valid RR intervals
 float hrvIntervals[10];
 uint8_t hrvIndex = 0;
 uint8_t hrvCount = 0;
 
-// SpO2 Ratio-of-Ratios tracking
-float maxAcIR = 0, minAcIR = 0;
-float maxAcRed = 0, minAcRed = 0;
-int sampleCounter = 0;
+// Respiratory rate estimation - last 20 RR intervals for RSA analysis
+float rraBuf[20]; // RR interval amplitude buffer for RSA
+uint8_t rraBufIdx = 0;
+uint8_t rraBufCount = 0;
 
-// Timers
-unsigned long lastTelemetryStream = 0;
-unsigned long lastDisplayRefresh = 0;
-unsigned long lastTempRead = 0;
+// SpO2 Ratio-of-Ratios tracking - initialized to extremes for correct first window
+float maxAcIR  = -999999, minAcIR  = 999999;
+float maxAcRed = -999999, minAcRed = 999999;
+int   sampleCounter = 0;
 
 // ==========================================
-// 4. MAX30102 DIRECT HARDWARE DRIVER
+// 4. VIBRATION MOTOR ALERT STATE
+// ==========================================
+unsigned long vibNextToggle = 0;
+int  vibPulsesLeft  = 0;
+bool vibMotorOn     = false;
+bool spo2AlertArmed = true;
+bool hrAlertArmed   = true;
+
+// ==========================================
+// 5. DEEP SLEEP / POWER CONSERVATION
+// ==========================================
+unsigned long offWristStart = 0;
+bool offWristTimerActive = false;
+
+// ==========================================
+// 6. TIMERS
+// ==========================================
+unsigned long lastTelemetryStream = 0;
+unsigned long lastDisplayRefresh  = 0;
+unsigned long lastTempRead        = 0;
+
+// ==========================================
+// 7. MAX30102 DIRECT HARDWARE DRIVER
 // ==========================================
 class MAX30102Driver {
 public:
   static bool begin() {
     Wire.beginTransmission(MAX30102_ADDR);
-    if (Wire.endTransmission() != 0) {
-      return false; // Device not found on I2C
-    }
+    if (Wire.endTransmission() != 0) return false;
 
-    // Reset sensor
-    writeRegister(0x09, 0x40);
+    writeRegister(0x09, 0x40); // Reset
     delay(50);
 
-    // FIFO Configuration: sample average 4, FIFO rollover enabled, FIFO almost full 17
+    // FIFO: sample avg 4, rollover on, almost-full 17
     writeRegister(0x08, 0x5F);
-
-    // Mode Configuration: SpO2 & Heart Rate mode (Red + IR enabled)
+    // Mode: SpO2 + HR (Red + IR)
     writeRegister(0x09, 0x03);
-
-    // SpO2 Configuration: ADC range = 4096nA, Sample Rate = 100 Hz, Pulse Width = 411us (18-bit)
+    // SpO2: ADC range 4096nA, 100 Hz, 411us pulse width (18-bit)
     writeRegister(0x0A, 0x27);
-
-    // LED Pulse Amplitude (current): 0x24 = ~7.2mA for optical bio-perfusion
+    // LED current: ~7.2mA
     writeRegister(0x0C, 0x24); // Red LED
     writeRegister(0x0D, 0x24); // IR LED
 
@@ -129,14 +149,10 @@ public:
   }
 
   static bool readSample(uint32_t &red, uint32_t &ir) {
-    // Read FIFO read and write pointers
     uint8_t wrPtr = readRegister(0x04);
     uint8_t rdPtr = readRegister(0x06);
-    if (wrPtr == rdPtr) {
-      return false; // FIFO empty
-    }
+    if (wrPtr == rdPtr) return false;
 
-    // Request 6 bytes from FIFO data register (0x07)
     Wire.beginTransmission(MAX30102_ADDR);
     Wire.write(0x07);
     if (Wire.endTransmission(false) != 0) return false;
@@ -144,11 +160,9 @@ public:
     Wire.requestFrom((uint8_t)MAX30102_ADDR, (uint8_t)6);
     if (Wire.available() < 6) return false;
 
-    // Byte 0-2: Red channel (18 bits)
     red = ((uint32_t)Wire.read() << 16) | ((uint32_t)Wire.read() << 8) | Wire.read();
     red &= 0x03FFFF;
 
-    // Byte 3-5: IR channel (18 bits)
     ir = ((uint32_t)Wire.read() << 16) | ((uint32_t)Wire.read() << 8) | Wire.read();
     ir &= 0x03FFFF;
 
@@ -156,10 +170,9 @@ public:
   }
 
   static float readDieTemperature() {
-    writeRegister(0x21, 0x01); // Trigger temperature conversion
+    writeRegister(0x21, 0x01); // Trigger conversion
     delay(30);
-
-    int8_t tempInt = (int8_t)readRegister(0x1F);
+    int8_t  tempInt  = (int8_t)readRegister(0x1F);
     uint8_t tempFrac = readRegister(0x20);
     return (float)tempInt + ((float)tempFrac * 0.0625f);
   }
@@ -182,15 +195,13 @@ private:
 };
 
 // ==========================================
-// 5. BLE SERVER CALLBACKS
+// 8. BLE SERVER CALLBACKS
 // ==========================================
 class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* pServer) {
-    bleClientConnected = true;
-  }
-  void onDisconnect(BLEServer* pServer) {
+  void onConnect(BLEServer*) override    { bleClientConnected = true; }
+  void onDisconnect(BLEServer*) override {
     bleClientConnected = false;
-    BLEDevice::startAdvertising(); // Resume advertising immediately
+    BLEDevice::startAdvertising();
   }
 };
 
@@ -199,108 +210,145 @@ void initBluetooth() {
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
 
-  // 1. Standard Heart Rate Service
   BLEService* pHrService = pServer->createService(BLE_SERVICE_HR);
-  pHrChar = pHrService->createCharacteristic(
-    BLE_CHAR_HR_MEASURE,
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
+  pHrChar = pHrService->createCharacteristic(BLE_CHAR_HR_MEASURE, BLECharacteristic::PROPERTY_NOTIFY);
   pHrChar->addDescriptor(new BLE2902());
   pHrService->start();
 
-  // 2. Battery Service
   BLEService* pBattService = pServer->createService(BLE_SERVICE_BATTERY);
-  pBattChar = pBattService->createCharacteristic(
-    BLE_CHAR_BATTERY_LEVEL,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
-  );
+  pBattChar = pBattService->createCharacteristic(BLE_CHAR_BATTERY_LEVEL, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
   pBattChar->addDescriptor(new BLE2902());
   pBattService->start();
 
-  // 3. Custom AURA Telemetry Service
   BLEService* pAuraService = pServer->createService(AURA_SERVICE_UUID);
-  pTelemetryChar = pAuraService->createCharacteristic(
-    AURA_CHAR_TELEMETRY_UUID,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
-  );
+  pTelemetryChar = pAuraService->createCharacteristic(AURA_CHAR_TELEMETRY_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
   pTelemetryChar->addDescriptor(new BLE2902());
   pAuraService->start();
 
-  // Configure Advertising
   BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(BLE_SERVICE_HR);
   pAdvertising->addServiceUUID(AURA_SERVICE_UUID);
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06); // Functions well with iOS/Web Bluetooth
-  pAdvertising->setMinPreferred(0x12);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
 }
 
 // ==========================================
-// 6. REAL SIGNAL PROCESSING ALGORITHMS
+// 9. RESPIRATORY RATE ESTIMATION (PPG RSA)
+// ==========================================
+// Respiratory Sinus Arrhythmia: breathing modulates the RR interval series.
+// Count zero-crossings of the IBI sequence around its mean → breathing frequency.
+void computeRespiratoryRate() {
+  if (rraBufCount < 10) return;
+
+  float mean = 0;
+  for (uint8_t i = 0; i < rraBufCount; i++) mean += rraBuf[i];
+  mean /= (float)rraBufCount;
+
+  // Count zero-crossings (sign changes relative to mean)
+  int crossings = 0;
+  bool above = rraBuf[0] > mean;
+  for (uint8_t i = 1; i < rraBufCount; i++) {
+    bool nowAbove = rraBuf[i] > mean;
+    if (nowAbove != above) { crossings++; above = nowAbove; }
+  }
+
+  // Total window duration in minutes
+  float windowMs = 0;
+  for (uint8_t i = 0; i < rraBufCount; i++) windowMs += rraBuf[i];
+  float windowMin = windowMs / 60000.0f;
+
+  if (windowMin > 0 && crossings >= 2) {
+    float rr = ((float)crossings / 2.0f) / windowMin;
+    currentRespRate = constrain(rr, 4.0f, 40.0f);
+  }
+}
+
+// ==========================================
+// 10. REAL SIGNAL PROCESSING ALGORITHMS
 // ==========================================
 void processPhysiologicalData() {
   uint32_t r, ir;
   while (MAX30102Driver::readSample(r, ir)) {
     rawRed = r;
-    rawIR = ir;
+    rawIR  = ir;
 
-    // Contact Check: If IR is below threshold, finger/wrist is disconnected
     if (rawIR < IR_FINGER_THRESHOLD) {
-      fingerDetected = false;
-      currentHeartRate = 0.0;
-      currentSpO2 = 0.0;
-      currentHrvSdnn = 0;
-      dcFilterIR = 0;
-      dcFilterRed = 0;
+      fingerDetected    = false;
+      currentHeartRate  = 0.0;
+      currentSpO2       = 0.0;
+      currentHrvSdnn    = 0;
+      currentPnn50      = 0.0;
+      dcFilterIR        = 0;
+      dcFilterRed       = 0;
+
+      // Deep sleep power conservation: enter light sleep after 60s off-wrist
+      if (!offWristTimerActive) {
+        offWristStart       = millis();
+        offWristTimerActive = true;
+      } else if (millis() - offWristStart > 60000) {
+        display.clearDisplay();
+        display.setCursor(22, 24);
+        display.print("POWER SAVE");
+        display.setCursor(8, 38);
+        display.print("Place on wrist...");
+        display.display();
+
+        BLEDevice::stopAdvertising();
+        esp_sleep_enable_timer_wakeup(10ULL * 1000000ULL); // 10s wakeup
+        esp_light_sleep_start();
+        BLEDevice::startAdvertising();
+        offWristStart = millis();
+      }
       continue;
     }
 
-    fingerDetected = true;
+    fingerDetected      = true;
+    offWristTimerActive = false;
+    spo2AlertArmed      = true;
+    hrAlertArmed        = true;
 
-    // High-Pass Filter: Extract AC pulse from DC tissue attenuation
-    if (dcFilterIR == 0) {
-      dcFilterIR = rawIR;
-      dcFilterRed = rawRed;
+    // DC-blocking high-pass filter: extract AC pulsatile component
+    if (dcFilterIR == 0.0f) {
+      dcFilterIR  = (float)rawIR;
+      dcFilterRed = (float)rawRed;
     } else {
-      dcFilterIR = 0.95f * dcFilterIR + 0.05f * (float)rawIR;
+      dcFilterIR  = 0.95f * dcFilterIR  + 0.05f * (float)rawIR;
       dcFilterRed = 0.95f * dcFilterRed + 0.05f * (float)rawRed;
     }
 
-    acIR = (float)rawIR - dcFilterIR;
+    acIR  = (float)rawIR  - dcFilterIR;
     acRed = (float)rawRed - dcFilterRed;
 
-    // Track AC peak-to-peak for SpO2 calculation
-    if (acIR > maxAcIR) maxAcIR = acIR;
-    if (acIR < minAcIR) minAcIR = acIR;
+    // Track AC peak-to-peak for SpO2
+    if (acIR  > maxAcIR)  maxAcIR  = acIR;
+    if (acIR  < minAcIR)  minAcIR  = acIR;
     if (acRed > maxAcRed) maxAcRed = acRed;
     if (acRed < minAcRed) minAcRed = acRed;
 
     sampleCounter++;
 
-    // Peak Detection on inverted AC pulse (hemodynamic systolic surge absorbs IR light)
+    // Beat detection: IR trough (systolic surge absorbs IR, causes negative AC dip)
     static float prevAcIR = 0;
-    static bool troughDetected = false;
+    static bool  troughDetected = false;
     unsigned long now = millis();
 
     if (acIR < -120.0f && acIR > prevAcIR && !troughDetected) {
       troughDetected = true;
       unsigned long ibi = now - lastBeatTimestamp;
 
-      // Validate physiologic beat interval (333ms = 180 BPM, 1500ms = 40 BPM)
       if (ibi >= 333 && ibi <= 1500 && lastBeatTimestamp > 0) {
         lastBeatTimestamp = now;
 
-        // Rolling average for smooth BPM
+        // 4-beat rolling average for BPM
         recentIbis[ibiIndex] = (float)ibi;
         ibiIndex = (ibiIndex + 1) % 4;
-
         float sumIbi = 0;
         for (int i = 0; i < 4; i++) sumIbi += recentIbis[i];
-        float avgIbi = sumIbi / 4.0f;
-        currentHeartRate = 60000.0f / avgIbi;
+        currentHeartRate = 60000.0f / (sumIbi / 4.0f);
 
-        // HRV (SDNN) calculation across last 10 intervals
+        // HRV: SDNN over last 10 intervals
         hrvIntervals[hrvIndex] = (float)ibi;
         hrvIndex = (hrvIndex + 1) % 10;
         if (hrvCount < 10) hrvCount++;
@@ -311,11 +359,24 @@ void processPhysiologicalData() {
           meanIbi /= (float)hrvCount;
 
           float varianceSum = 0;
-          for (int i = 0; i < hrvCount; i++) {
-            varianceSum += pow(hrvIntervals[i] - meanIbi, 2);
+          for (int i = 0; i < hrvCount; i++)
+            varianceSum += powf(hrvIntervals[i] - meanIbi, 2);
+          currentHrvSdnn = (int)roundf(sqrtf(varianceSum / (float)hrvCount));
+
+          // pNN50: fraction of successive diffs > 50ms
+          int above50 = 0;
+          for (int i = 1; i < (int)hrvCount; i++) {
+            if (fabsf(hrvIntervals[i] - hrvIntervals[i-1]) > 50.0f) above50++;
           }
-          currentHrvSdnn = round(sqrt(varianceSum / (float)hrvCount));
+          currentPnn50 = (float)above50 / (float)(hrvCount - 1) * 100.0f;
         }
+
+        // Respiratory rate: push IBI into RSA buffer
+        rraBuf[rraBufIdx] = (float)ibi;
+        rraBufIdx = (rraBufIdx + 1) % 20;
+        if (rraBufCount < 20) rraBufCount++;
+        computeRespiratoryRate();
+
       } else if (lastBeatTimestamp == 0 || ibi > 2000) {
         lastBeatTimestamp = now;
       }
@@ -324,24 +385,18 @@ void processPhysiologicalData() {
     }
     prevAcIR = acIR;
 
-    // SpO2 calculation computed every 100 samples (~1 second)
+    // SpO2: Ratio-of-Ratios computed every 100 samples (~1s at 100Hz)
     if (sampleCounter >= 100) {
-      float ptpIR = maxAcIR - minAcIR;
+      float ptpIR  = maxAcIR  - minAcIR;
       float ptpRed = maxAcRed - minAcRed;
 
       if (ptpIR > 50 && ptpRed > 50 && dcFilterIR > 1000 && dcFilterRed > 1000) {
-        float ratio = (ptpRed / dcFilterRed) / (ptpIR / dcFilterIR);
-        // Calibrated empirical curve: SpO2 = 104 - 17 * R
-        float calcSpo2 = 104.0f - (17.0f * ratio);
-        calcSpo2 = constrain(calcSpo2, 85.0f, 99.8f);
-
-        // Exponential smoothing
-        if (currentSpO2 == 0.0f) currentSpO2 = calcSpo2;
-        else currentSpO2 = 0.85f * currentSpO2 + 0.15f * calcSpo2;
+        float ratio     = (ptpRed / dcFilterRed) / (ptpIR / dcFilterIR);
+        float calcSpo2  = constrain(104.0f - (17.0f * ratio), 85.0f, 99.8f);
+        currentSpO2 = (currentSpO2 == 0.0f) ? calcSpo2 : (0.85f * currentSpO2 + 0.15f * calcSpo2);
       }
 
-      // Reset AC peak-to-peak tracker
-      maxAcIR = -999999; minAcIR = 999999;
+      maxAcIR  = -999999; minAcIR  = 999999;
       maxAcRed = -999999; minAcRed = 999999;
       sampleCounter = 0;
     }
@@ -349,86 +404,102 @@ void processPhysiologicalData() {
 }
 
 // ==========================================
-// 7. BATTERY MONITORING
+// 11. BATTERY MONITORING
 // ==========================================
 int readBatteryPercentage() {
-  // Read analog millivolts on ADC pin
-  uint32_t mv = analogReadMilliVolts(BATTERY_ADC_PIN);
-  // Voltage divider (100k + 100k) divides by 2, so multiply by 2 for raw battery voltage
-  float vBat = (float)mv * 2.0f / 1000.0f;
-
+  uint32_t mv  = analogReadMilliVolts(BATTERY_ADC_PIN);
+  float    vBat = (float)mv * 2.0f / 1000.0f; // voltage divider 100k+100k
   if (vBat <= 3.2f) return 5;
   if (vBat >= 4.2f) return 100;
-  return (int)((vBat - 3.2f) / (4.2f - 3.2f) * 100.0f);
+  return (int)((vBat - 3.2f) / 1.0f * 100.0f);
 }
 
 // ==========================================
-// 8. ON-WRIST 0.96" OLED DISPLAY RENDERING
+// 12. VIBRATION MOTOR ALERTS (non-blocking)
+// ==========================================
+void runVibrationMotor() {
+  // Trigger on clinical threshold breach (armed once per finger-on session)
+  if (fingerDetected && currentSpO2 > 0 && currentSpO2 < 94.0f && spo2AlertArmed && vibPulsesLeft == 0) {
+    vibPulsesLeft  = 6; // 3 on-off pulses
+    spo2AlertArmed = false;
+  }
+  if (fingerDetected && currentHeartRate > 110.0f && hrAlertArmed && vibPulsesLeft == 0) {
+    vibPulsesLeft = 4; // 2 on-off pulses
+    hrAlertArmed  = false;
+  }
+
+  // Non-blocking pulse output
+  unsigned long now = millis();
+  if (vibPulsesLeft > 0 && now >= vibNextToggle) {
+    vibMotorOn = !vibMotorOn;
+    digitalWrite(VIBRATION_PIN, vibMotorOn ? HIGH : LOW);
+    vibNextToggle = now + 200;
+    if (!vibMotorOn) vibPulsesLeft--;
+  }
+}
+
+// ==========================================
+// 13. ON-WRIST OLED DISPLAY RENDERING
 // ==========================================
 void renderOledDisplay() {
   display.clearDisplay();
 
-  // Top Status Bar: AURA-OS | BLE Status | Battery %
+  // Status bar
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.print("AURA-OS");
-
   display.setCursor(56, 0);
-  if (bleClientConnected) {
-    display.print("[BLE ON]");
-  } else {
-    display.print("[BLE RDY]");
-  }
-
+  display.print(bleClientConnected ? "[BLE ON]" : "[BLE RDY]");
   display.setCursor(102, 0);
   display.print(batteryPercentage);
   display.print("%");
-
   display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
 
-  // Main Biometric Body
   if (fingerDetected && currentHeartRate > 35.0f) {
-    // Large Heart Rate Readout
-    display.setCursor(0, 16);
+    display.setCursor(0, 14);
     display.setTextSize(1);
-    display.print("PULSE:");
-
+    display.print("HR:");
     display.setTextSize(2);
-    display.setCursor(44, 14);
-    display.print((int)round(currentHeartRate));
+    display.setCursor(22, 12);
+    display.print((int)roundf(currentHeartRate));
     display.setTextSize(1);
     display.print(" BPM");
 
-    // SpO2 Readout
-    display.setCursor(0, 36);
-    display.print("SpO2 : ");
-    display.setTextSize(2);
-    display.print((int)round(currentSpO2 > 0 ? currentSpO2 : 98));
+    display.setCursor(0, 30);
+    display.print("SpO2:");
     display.setTextSize(1);
-    display.print(" %");
+    if (currentSpO2 > 0) display.print((int)roundf(currentSpO2));
+    else display.print("--");
+    display.print("%");
 
-    // Bottom Stats: HRV & Skin Temp
-    display.drawLine(0, 52, 127, 52, SSD1306_WHITE);
-    display.setCursor(0, 56);
+    display.setCursor(68, 30);
+    display.print("RR:");
+    if (currentRespRate > 0) display.print((int)roundf(currentRespRate));
+    else display.print("--");
+
+    display.drawLine(0, 42, 127, 42, SSD1306_WHITE);
+
+    display.setCursor(0, 46);
     display.print("HRV:");
     display.print(currentHrvSdnn);
     display.print("ms");
 
-    display.setCursor(70, 56);
+    display.setCursor(0, 56);
+    display.print("pNN50:");
+    display.print((int)roundf(currentPnn50));
+    display.print("%");
+
+    display.setCursor(84, 56);
     display.print("T:");
-    display.print(currentTempC, 1);
-    display.print("C");
+    if (currentTempC > 0) display.print(currentTempC, 1);
+    else display.print("--");
+
   } else {
-    // Contact Disconnected Warning
     display.setCursor(20, 22);
-    display.setTextSize(1);
     display.print("AURA WRISTBAND");
-
     display.setCursor(14, 34);
-    display.setTextSize(1);
     display.print("[ SENSOR CONTACT ]");
-
     display.setCursor(10, 48);
     display.print("Position on wrist");
   }
@@ -437,47 +508,41 @@ void renderOledDisplay() {
 }
 
 // ==========================================
-// 9. TELEMETRY STREAMING (USB & BLE)
+// 14. TELEMETRY STREAMING (USB & BLE)
 // ==========================================
 void sendTelemetryStream() {
-  // 1. JSON Telemetry for USB Web Serial & Web Bluetooth
-  // Format matches AURA-OS Ingestion Protocol exactly:
-  // {"hr":74.2,"spo2":98.3,"temp":36.7,"hrv":56,"batt":92,"finger":true}
-  String jsonPayload = "{";
-  jsonPayload += "\"hr\":" + String(fingerDetected ? currentHeartRate : 0.0f, 1) + ",";
-  jsonPayload += "\"spo2\":" + String(fingerDetected ? currentSpO2 : 0.0f, 1) + ",";
-  jsonPayload += "\"temp\":" + String(currentTempC, 1) + ",";
-  jsonPayload += "\"hrv\":" + String(fingerDetected ? currentHrvSdnn : 0) + ",";
-  jsonPayload += "\"batt\":" + String(batteryPercentage) + ",";
-  jsonPayload += "\"finger\":" + String(fingerDetected ? "true" : "false") + ",";
-  jsonPayload += "\"ir\":" + String(rawIR) + ",";
-  jsonPayload += "\"red\":" + String(rawRed);
-  jsonPayload += "}";
+  String json = "{";
+  json += "\"hr\":"   + String(fingerDetected ? currentHeartRate : 0.0f, 1) + ",";
+  json += "\"spo2\":" + String(fingerDetected ? currentSpO2 : 0.0f, 1) + ",";
+  json += "\"temp\":" + String(currentTempC, 1) + ",";
+  json += "\"hrv\":"  + String(fingerDetected ? currentHrvSdnn : 0) + ",";
+  json += "\"pnn50\":" + String(fingerDetected ? currentPnn50 : 0.0f, 1) + ",";
+  json += "\"rr\":"   + String(fingerDetected ? currentRespRate : 0.0f, 1) + ",";
+  json += "\"batt\":" + String(batteryPercentage) + ",";
+  json += "\"finger\":" + String(fingerDetected ? "true" : "false") + ",";
+  json += "\"ir\":"   + String(rawIR) + ",";
+  json += "\"red\":"  + String(rawRed);
+  json += "}";
 
-  // Emit to USB Serial at 115200 baud
-  Serial.println(jsonPayload);
+  Serial.println(json);
 
-  // Emit to BLE GATT Server if connected
   if (bleClientConnected) {
-    // A. Custom JSON Telemetry Characteristic
     if (pTelemetryChar) {
-      pTelemetryChar->setValue(jsonPayload.c_str());
+      pTelemetryChar->setValue(json.c_str());
       pTelemetryChar->notify();
     }
 
-    // B. Standard GATT Heart Rate Measurement Packet (UUID 0x2A37)
     if (pHrChar && fingerDetected && currentHeartRate > 0) {
-      uint8_t hrPacket[4];
-      hrPacket[0] = 0b00010000; // Flags: 8-bit HR, RR-interval present
-      hrPacket[1] = (uint8_t)round(currentHeartRate);
-      uint16_t rr1024 = (uint16_t)round(((60000.0f / currentHeartRate) / 1000.0f) * 1024.0f);
+      uint8_t  hrPacket[4];
+      hrPacket[0] = 0b00010000; // flags: 8-bit HR, RR-interval present
+      hrPacket[1] = (uint8_t)roundf(currentHeartRate);
+      uint16_t rr1024 = (uint16_t)roundf(((60000.0f / currentHeartRate) / 1000.0f) * 1024.0f);
       hrPacket[2] = rr1024 & 0xFF;
       hrPacket[3] = (rr1024 >> 8) & 0xFF;
       pHrChar->setValue(hrPacket, 4);
       pHrChar->notify();
     }
 
-    // C. Standard GATT Battery Level (UUID 0x2A19)
     if (pBattChar) {
       uint8_t battVal = (uint8_t)batteryPercentage;
       pBattChar->setValue(&battVal, 1);
@@ -487,65 +552,62 @@ void sendTelemetryStream() {
 }
 
 // ==========================================
-// 10. SETUP & MAIN EXECUTION LOOP
+// 15. SETUP & MAIN EXECUTION LOOP
 // ==========================================
 void setup() {
   Serial.begin(115200);
   delay(200);
 
-  // Initialize I2C Bus with assigned ESP32-C3 pins
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000); // 400 kHz fast mode
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000);
 
-  // Initialize SSD1306 OLED
+  pinMode(VIBRATION_PIN, OUTPUT);
+  digitalWrite(VIBRATION_PIN, LOW);
+
   if (display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(18, 18);
-    display.print("NASA · HRP");
-    display.setCursor(10, 32);
+    display.setCursor(18, 14);
+    display.print("NASA \xB7 HRP");
+    display.setCursor(10, 26);
     display.print("AURA-OS WRISTBAND");
-    display.setCursor(14, 46);
+    display.setCursor(14, 38);
     display.print("ESP32-C3 BIOSENSOR");
+    display.setCursor(8, 52);
+    display.print("Initializing BLE...");
     display.display();
   }
 
-  // Initialize MAX30102 Biosensor
-  bool sensorOk = MAX30102Driver::begin();
-  if (!sensorOk) {
+  if (!MAX30102Driver::begin()) {
     Serial.println("{\"status\":\"ERROR\",\"msg\":\"MAX30102 not found on I2C\"}");
   }
 
-  // Initialize Bluetooth Low Energy Stack
   initBluetooth();
-
   delay(800);
 }
 
 void loop() {
   unsigned long now = millis();
 
-  // 1. Process Raw Optical Samples from MAX30102
   processPhysiologicalData();
 
-  // 2. Periodic Die Temperature Reading (every 3 seconds)
   if (now - lastTempRead >= 3000) {
-    currentTempC = MAX30102Driver::readDieTemperature();
-    batteryPercentage = readBatteryPercentage();
-    lastTempRead = now;
+    currentTempC        = MAX30102Driver::readDieTemperature();
+    batteryPercentage   = readBatteryPercentage();
+    lastTempRead        = now;
   }
 
-  // 3. Telemetry Stream to USB Serial and BLE (every 200ms = 5Hz telemetry)
+  runVibrationMotor();
+
   if (now - lastTelemetryStream >= 200) {
     sendTelemetryStream();
     lastTelemetryStream = now;
   }
 
-  // 4. Update On-Wrist OLED Display (every 100ms = 10 FPS UI)
   if (now - lastDisplayRefresh >= 100) {
     renderOledDisplay();
-    lastDisplayRefresh = now;
+    lastDisplayRefresh  = now;
   }
 
-  delay(5); // Yield to FreeRTOS scheduler & BLE stack
+  delay(5);
 }
