@@ -551,6 +551,24 @@ class App {
         this.activeHardwareSource = ws.deviceName || 'Orbita Watch';
         this.renderUserAndDeviceSelectorPills();
         this.updateDisplay();
+        return;
+      }
+
+      const webBleAvailable = this.bleService.hasWebBluetooth();
+      const secureContext = window.isSecureContext;
+      const msg = webBleAvailable
+        ? 'Watch not linked: bridge offline (127.0.0.1:8766). Run `npm run bridge` in a second terminal, or pair via Web Bluetooth in the Hardware panel.'
+        : secureContext
+          ? 'Watch not linked: bridge offline & no Web Bluetooth in this browser. Run `npm run bridge`, or open this dashboard in Chrome/Edge and pair via Web Bluetooth.'
+          : 'Watch not linked: no Web Bluetooth on non-localhost URLs. Open http://localhost:5173 in Chrome/Edge, or run `npm run bridge`.';
+      console.warn('[Orbita]', msg);
+      if (this.terminalLogger) {
+        this.terminalLogger.logEntry({
+          deviceName: 'ORBITA LINK',
+          vitals: { hr: null },
+          healthEval: { level: 'mild' },
+          eventMessage: msg
+        });
       }
     });
   }

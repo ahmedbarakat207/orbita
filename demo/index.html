@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ORBITA // NASA Space Apps Challenge 2026 — Autonomous Crew Health Telemetry Station</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Top Mission Header -->
+  <header class="mission-header">
+    <div class="brand-block">
+      <div class="brand-badge">
+        <i class="fa-solid fa-satellite-dish"></i> NASA Space Apps 2026
+      </div>
+      <div class="brand-title">
+        <h1 class="brand-name">ORBITA <span>// AURA-OS</span></h1>
+        <span class="brand-sub">Autonomous Crew Health Telemetry Station · COTS Bioastronautics</span>
+      </div>
+    </div>
+
+    <div class="mission-telemetry-strip mono">
+      <div class="telem-item">
+        <span class="telem-label">Mission Time (MET)</span>
+        <span class="telem-val" id="metDisplay">+142D 08:34:12</span>
+      </div>
+      <div class="telem-item">
+        <span class="telem-label">Orbit Status</span>
+        <span class="telem-val green">TRANSIT // HAB-1</span>
+      </div>
+      <div class="telem-item">
+        <span class="telem-label">Station Autonomy</span>
+        <span class="telem-val">100% OFFLINE EDGE</span>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <button class="btn-ctrl" id="btnToggleAudio" title="Toggle audio alarms">
+        <i class="fa-solid fa-volume-xmark"></i> Muted
+      </button>
+      <button class="btn-ctrl" id="btnShowArch" title="View technical architecture">
+        <i class="fa-solid fa-microchip"></i> COTS Architecture
+      </button>
+    </div>
+  </header>
+
+  <!-- Interactive Scenario & Crew Switcher -->
+  <section class="scenario-bar">
+    <div class="scenario-title">
+      <i class="fa-solid fa-sliders"></i> Judge Simulation Scenarios:
+    </div>
+
+    <div class="scenario-pills">
+      <button class="pill-btn active" data-scenario="nominal">
+        <i class="fa-solid fa-check"></i> Nominal Artemis Transit
+      </button>
+      <button class="pill-btn" data-scenario="eva">
+        <i class="fa-solid fa-person-walking"></i> EVA High Workload
+      </button>
+      <button class="pill-btn alert-mode" data-scenario="hypoxia">
+        <i class="fa-solid fa-triangle-exclamation"></i> Cabin Hypoxia Emergency
+      </button>
+      <button class="pill-btn" data-scenario="microgravity">
+        <i class="fa-solid fa-globe"></i> Microgravity Intolerance
+      </button>
+      <button class="pill-btn" data-scenario="ble" title="Pair your real physical wearable">
+        <i class="fa-brands fa-bluetooth-b"></i> Web-Bluetooth Live
+      </button>
+    </div>
+
+    <div class="header-controls">
+      <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-right: 4px;">Astronaut:</label>
+      <select id="crewSelect" class="btn-ctrl mono" style="outline: none; padding: 4px 8px;">
+        <option value="vance">CDR Elena Vance (Commander)</option>
+        <option value="cole">FE Marcus Cole (EVA Specialist)</option>
+        <option value="morales">AST Aisha Morales (Astrobiology)</option>
+      </select>
+    </div>
+  </section>
+
+  <!-- Main Grid Dashboard -->
+  <main class="main-container">
+
+    <!-- Left Column: Biometrics & Oscilloscope -->
+    <div class="left-col">
+
+      <!-- 8-Card Vitals Grid -->
+      <section class="vitals-grid">
+        <!-- HR -->
+        <div class="vital-card status-nominal" id="card-hr">
+          <div class="vital-top">
+            <span class="vital-name">Heart Rate</span>
+            <span class="vital-badge badge-sensor"><i class="fa-solid fa-wave-square"></i> PPG Sensor</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-hr">72</span>
+            <span class="vital-unit">BPM</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-hr">Nominal Sinus</span>
+            <span class="mono" style="font-size: 10px;">0x2A37</span>
+          </div>
+        </div>
+
+        <!-- SpO2 -->
+        <div class="vital-card status-nominal" id="card-spo2">
+          <div class="vital-top">
+            <span class="vital-name">Blood Oxygen</span>
+            <span class="vital-badge badge-sensor"><i class="fa-solid fa-lungs"></i> Optical</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-spo2">98%</span>
+            <span class="vital-unit">SpO₂</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-spo2">Optimal Perfusion</span>
+            <span class="mono" style="font-size: 10px;">0x0004</span>
+          </div>
+        </div>
+
+        <!-- Stress -->
+        <div class="vital-card status-nominal" id="card-stress">
+          <div class="vital-top">
+            <span class="vital-name">Autonomic Stress</span>
+            <span class="vital-badge badge-sensor"><i class="fa-solid fa-gauge-high"></i> Derived</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-stress">28</span>
+            <span class="vital-unit">/100</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-stress">Autonomic Rest</span>
+            <span class="mono" style="font-size: 10px;">Symp/Para</span>
+          </div>
+        </div>
+
+        <!-- HRV -->
+        <div class="vital-card status-nominal" id="card-hrv">
+          <div class="vital-top">
+            <span class="vital-name">HRV (SDNN)</span>
+            <span class="vital-badge badge-sensor"><i class="fa-solid fa-bolt"></i> Beat Delta</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-hrv">58 ms</span>
+            <span class="vital-unit">SDNN</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-hrv">Rolling 30s</span>
+            <span class="mono" style="font-size: 10px;">RR Rec.</span>
+          </div>
+        </div>
+
+        <!-- Blood Pressure (Estimated) -->
+        <div class="vital-card status-nominal" id="card-bp">
+          <div class="vital-top">
+            <span class="vital-name">Blood Pressure</span>
+            <span class="vital-badge badge-est">Model Est.</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-bp">118/76</span>
+            <span class="vital-unit">mmHg</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-bp">Arterial Pressure</span>
+            <span class="mono" style="font-size: 10px;">PTT Proxy</span>
+          </div>
+        </div>
+
+        <!-- Mean Arterial Pressure -->
+        <div class="vital-card status-nominal" id="card-map">
+          <div class="vital-top">
+            <span class="vital-name">Mean Art. Press.</span>
+            <span class="vital-badge badge-est">Derived</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-map">90</span>
+            <span class="vital-unit">mmHg</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-map">Perfusion Mean</span>
+            <span class="mono" style="font-size: 10px;">Cerebral</span>
+          </div>
+        </div>
+
+        <!-- Respiration -->
+        <div class="vital-card status-nominal" id="card-resp">
+          <div class="vital-top">
+            <span class="vital-name">Respiration</span>
+            <span class="vital-badge badge-est">RSA Model</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-resp">14</span>
+            <span class="vital-unit">BrPM</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-resp">RSA-Coupled</span>
+            <span class="mono" style="font-size: 10px;">Sinus Rhythm</span>
+          </div>
+        </div>
+
+        <!-- Body Temp -->
+        <div class="vital-card status-nominal" id="card-temp">
+          <div class="vital-top">
+            <span class="vital-name">Core Temp</span>
+            <span class="vital-badge badge-est">Metabolic</span>
+          </div>
+          <div class="vital-middle">
+            <span class="vital-value mono" id="val-temp">36.8</span>
+            <span class="vital-unit">°C</span>
+          </div>
+          <div class="vital-bottom">
+            <span class="vital-status-text" id="sub-temp">Thermal Balance</span>
+            <span class="mono" style="font-size: 10px;">Normothermia</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4-Channel Sweep Oscilloscope -->
+      <section class="oscilloscope-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-chart-line" style="color: var(--neon-cyan);"></i>
+            Real-Time Oscilloscope Sweep (Photoplethysmography & Autonomic Spectrum)
+          </div>
+          <div class="channel-toggles">
+            <button class="chan-btn c-ecg active" data-channel="ecg"><i class="fa-solid fa-circle" style="font-size: 7px;"></i> CH1: PPG Pulse</button>
+            <button class="chan-btn c-spo2 active" data-channel="spo2"><i class="fa-solid fa-circle" style="font-size: 7px;"></i> CH2: SpO₂ Perfusion</button>
+            <button class="chan-btn c-stress active" data-channel="stress"><i class="fa-solid fa-circle" style="font-size: 7px;"></i> CH3: Stress Spectrum</button>
+          </div>
+        </div>
+
+        <div class="scope-canvas-wrap">
+          <canvas id="scopeCanvas"></canvas>
+          <div class="scope-grid-overlay"></div>
+        </div>
+
+        <div class="scope-footer mono">
+          <span>SWEEP: 25 mm/s · GAIN: 10 mm/mV · PHOSPHOR DECAY: NOMINAL</span>
+          <span>AUTONOMOUS SAMPLING RATE: 100 Hz</span>
+        </div>
+      </section>
+
+      <!-- Flight Recorder Panel -->
+      <section class="recorder-panel">
+        <div class="rec-status">
+          <span class="rec-dot" id="recDot"></span>
+          <div>
+            <div style="font-weight: 700; font-size: 12px;" id="recLabel">Flight Telemetry Recorder</div>
+            <div class="mono" style="font-size: 10px; color: var(--text-muted);" id="recCount">0 samples recorded</div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-ctrl" id="btnRecord">
+            <i class="fa-solid fa-circle"></i> Record
+          </button>
+          <button class="btn-ctrl" id="btnExportJson">
+            <i class="fa-solid fa-cloud-arrow-down"></i> Downlink (NASA JSON)
+          </button>
+          <button class="btn-ctrl" id="btnExportCsv">
+            <i class="fa-solid fa-file-csv"></i> Export CSV
+          </button>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Right Column: The Amazfit Bip U COTS Showcase -->
+    <div class="right-col">
+
+      <div class="bipu-card">
+        <div class="bipu-header">
+          <div class="bipu-title">
+            <i class="fa-solid fa-stopwatch" style="color: var(--neon-cyan);"></i>
+            Amazfit Bip U · COTS Flight Node
+          </div>
+          <div class="bipu-subtitle">
+            Reverse-Engineered Huami BLE GATT Telemetry & Direct Wrist Alerting
+          </div>
+          <div class="cots-badge">
+            <i class="fa-solid fa-shield-halved"></i> 100% Offline · AES-128 Decoupled from Cloud
+          </div>
+        </div>
+
+        <!-- Smartwatch Physical Bezel with Live Watchface -->
+        <div class="watch-viewport-wrap">
+          <div class="bipu-bezel" id="watchBezel">
+            <div class="bipu-crown"></div>
+            <div class="bipu-screen with-bg">
+
+              <!-- Top Bar -->
+              <div class="watch-top-bar mono">
+                <span><i class="fa-brands fa-bluetooth-b" style="color: var(--neon-cyan);"></i> BLE</span>
+                <span style="color: var(--neon-emerald);"><i class="fa-solid fa-battery-three-quarters"></i> 94%</span>
+              </div>
+
+              <!-- Time & Date -->
+              <div>
+                <div class="watch-time-big mono" id="watchTime">14:08:32</div>
+                <div class="watch-date-row">MISSION DAY 142</div>
+              </div>
+
+              <!-- Live Vitals HUD Strip -->
+              <div class="watch-vitals-strip mono">
+                <div class="watch-v-item">
+                  <span class="watch-v-lbl">HR</span>
+                  <span class="watch-v-val" style="color: #f87171;" id="watchHrVal">72</span>
+                </div>
+                <div class="watch-v-item">
+                  <span class="watch-v-lbl">SpO₂</span>
+                  <span class="watch-v-val" style="color: #38bdf8;" id="watchSpo2Val">98%</span>
+                </div>
+                <div class="watch-v-item">
+                  <span class="watch-v-lbl">STRESS</span>
+                  <span class="watch-v-val" style="color: #fbbf24;" id="watchStressVal">28</span>
+                </div>
+              </div>
+
+              <!-- Pulse Zone Bar -->
+              <div class="watch-gauge-wrap">
+                <div style="display: flex; justify-content: space-between; font-size: 8px; color: #94a3b8; margin-bottom: 2px;" class="mono">
+                  <span>PULSE LOAD</span>
+                  <span id="watchSteps">6,420 steps</span>
+                </div>
+                <div class="watch-pulse-bar">
+                  <div class="watch-pulse-fill" id="watchPulseFill"></div>
+                </div>
+              </div>
+
+              <!-- Danger Alert Overlay on the Watch Screen -->
+              <div class="watch-alert-overlay" id="watchAlertOverlay">
+                <div class="watch-alert-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                <div class="watch-alert-title" id="watchAlertTitle">DANGER DETECTED</div>
+                <div class="watch-alert-body" id="watchAlertBody">SpO2 level below threshold. Check oxygen mask.</div>
+                <button class="btn-ctrl" id="btnDismissAlert" style="margin-top: 10px; padding: 4px 10px; font-size: 10px; background: #fff; color: #000; border: none; font-weight: 800;">
+                  ACKNOWLEDGE
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Danger Dispatcher (Console to Watch) -->
+        <div class="dispatcher-section">
+          <div class="dispatcher-title">
+            <span><i class="fa-solid fa-bullhorn" style="color: var(--neon-crimson);"></i> Danger Dispatcher (Console ➔ Watch)</span>
+            <span class="mono" style="font-size: 9px; color: var(--neon-cyan);">0x2A46 / 0x2A06</span>
+          </div>
+
+          <div class="quick-alert-buttons">
+            <button class="btn-quick-alert" data-title="CABIN HYPOXIA DETECTED" data-msg="SpO2 down to 88% · ppO2 drop in Hab Module 1">
+              <i class="fa-solid fa-lungs"></i> Cabin Hypoxia Alert
+            </button>
+            <button class="btn-quick-alert" data-title="ACUTE TACHYCARDIA" data-msg="Heart Rate > 145 BPM · Suspend high workload">
+              <i class="fa-solid fa-heart-crack"></i> Tachycardia Surge
+            </button>
+            <button class="btn-quick-alert" data-title="EVA EXERTION LIMIT" data-msg="Autonomic strain 88/100 · Rest in Airlock">
+              <i class="fa-solid fa-person-walking-dashed-line-arrow-right"></i> EVA Exertion Warning
+            </button>
+            <button class="btn-quick-alert" data-title="SOLAR PARTICLE EVENT" data-msg="Proton flux spike · Retreat to storm haven">
+              <i class="fa-solid fa-sun"></i> SPE Haven Alarm
+            </button>
+          </div>
+
+          <div class="custom-alert-box">
+            <input type="text" id="customAlertInput" class="alert-input" placeholder="Type custom emergency dispatch..." />
+            <button class="btn-dispatch" id="btnCustomDispatch">
+              <i class="fa-solid fa-paper-plane"></i> Dispatch
+            </button>
+          </div>
+        </div>
+
+        <!-- Reverse-Engineered GATT Protocol Packet Terminal -->
+        <div class="packet-terminal">
+          <div class="terminal-header">
+            <span class="mono"><i class="fa-solid fa-terminal"></i> Huami GATT Frame Stream</span>
+            <span class="mono" style="color: var(--neon-emerald);">LIVE · 100% OFFLINE</span>
+          </div>
+          <div class="terminal-stream mono" id="packetStream">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Custom Watchface OTA Flashing Note -->
+        <div style="background: var(--bg-panel-sunken); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px; font-size: 11px; color: var(--text-secondary);">
+          <div style="font-weight: 700; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+            <i class="fa-solid fa-floppy-disk" style="color: var(--neon-sky);"></i> Custom 302×320 UIHH Watchface Binary
+          </div>
+          Compiled using Python Pillow and flashed Over-The-Air (OTA) via BLE GATT firmware update characteristics <code>0x1531 / 0x1532</code> without third-party phone apps.
+          <div style="margin-top: 6px;">
+            <a href="assets/aura_os_health.bin" download class="btn-ctrl" style="text-decoration: none; display: inline-flex; font-size: 10px; padding: 4px 8px;">
+              <i class="fa-solid fa-download"></i> Download Compiled Watchface (.bin)
+            </a>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <!-- NASA Human Research Program (HRP) Hazards Section -->
+  <section class="hrp-section">
+    <div class="section-headline">
+      <div>
+        <h2 class="headline-title">
+          <i class="fa-solid fa-shield-virus" style="color: var(--neon-cyan);"></i>
+          NASA Human Research Program (HRP) Hazards Mitigation
+        </h2>
+        <p class="headline-sub">
+          How Orbita and the COTS Amazfit Bip U integration target NASA's R.I.D.G.E. deep-space health risks
+        </p>
+      </div>
+    </div>
+
+    <div class="hrp-grid">
+      <!-- 1: Distance from Earth -->
+      <div class="hrp-card">
+        <div class="hrp-tag"><i class="fa-solid fa-satellite"></i> [D] Distance from Earth</div>
+        <div class="hrp-hazard">22+ Min Communication Latency</div>
+        <div class="hrp-desc">
+          On Mars transit, ground mission control cannot respond to real-time clinical emergencies. Health monitoring must operate with 100% edge autonomy.
+        </div>
+        <div class="hrp-solution">
+          ✓ Orbita Solution: Zero-cloud edge station running completely offline on local spacecraft network.
+        </div>
+      </div>
+
+      <!-- 2: Altered Gravity -->
+      <div class="hrp-card">
+        <div class="hrp-tag"><i class="fa-solid fa-arrows-up-down"></i> [G] Altered Gravity Fields</div>
+        <div class="hrp-hazard">Cephalad Fluid Shift & Cardiovascular Deconditioning</div>
+        <div class="hrp-desc">
+          Microgravity alters autonomic baroreceptor control, causing orthostatic intolerance upon landing and cardiovascular remodeling.
+        </div>
+        <div class="hrp-solution">
+          ✓ Orbita Solution: Real-time HRV (SDNN) tracking sympathetic/parasympathetic tone during LBNP and resistive exercise.
+        </div>
+      </div>
+
+      <!-- 3: Hostile Closed Environments -->
+      <div class="hrp-card">
+        <div class="hrp-tag"><i class="fa-solid fa-door-closed"></i> [E] Hostile Closed Environments</div>
+        <div class="hrp-hazard">Cabin Hypoxia & Hypercapnia (Elevated CO₂)</div>
+        <div class="hrp-desc">
+          Life support fluctuations can cause insidious hypoxia or CO₂ pocket headaches during sleep or heavy vehicular EVA workload.
+        </div>
+        <div class="hrp-solution">
+          ✓ Orbita Solution: Autonomous continuous SpO₂ drift detection with immediate tactile vibration & OLED danger dispatch.
+        </div>
+      </div>
+
+      <!-- 4: Isolation & Confinement -->
+      <div class="hrp-card">
+        <div class="hrp-tag"><i class="fa-solid fa-bed"></i> [I] Isolation & Confinement</div>
+        <div class="hrp-hazard">Circadian Fragmentation & Cognitive Fatigue</div>
+        <div class="hrp-desc">
+          Prolonged confinement disrupts sleep architecture, leading to vigilance degradation and heightened chronic neuroendocrine stress.
+        </div>
+        <div class="hrp-solution">
+          ✓ Orbita Solution: Sniffs sleep/wake states (0x0010) and tracks 24/7 autonomic stress index trends across mission rotations.
+        </div>
+      </div>
+
+      <!-- 5: Radiation -->
+      <div class="hrp-card">
+        <div class="hrp-tag"><i class="fa-solid fa-radiation"></i> [R] Space Radiation</div>
+        <div class="hrp-hazard">Solar Particle Events & Galactic Cosmic Rays</div>
+        <div class="hrp-desc">
+          Acute solar particle events require rapid emergency notification for crew retreat to high-density water-shielded storm havens.
+        </div>
+        <div class="hrp-solution">
+          ✓ Orbita Solution: Instant multi-crew wrist alarm broadcast with telemetry hooks for future CSA radiation dosimeters.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Technical Architecture Modal -->
+  <div class="modal-backdrop" id="archModal">
+    <div class="modal-box">
+      <button class="modal-close" id="btnCloseArch">&times;</button>
+      <h3 class="modal-title">
+        <i class="fa-solid fa-microchip" style="color: var(--neon-cyan);"></i>
+        Orbita COTS Bioastronautics Architecture
+      </h3>
+      <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; display: flex; flex-direction: column; gap: 14px;">
+        <p>
+          <strong>NASA's COTS Philosophy:</strong> On the International Space Station, NASA pioneered the use of Commercial Off-The-Shelf (COTS) devices—like commercial iPads and ThinkPads—rather than spending millions developing single-purpose aerospace hardware. Orbita applies this exact philosophy to bioastronautics by pairing an accessible <strong>$40 Amazfit Bip U smartwatch</strong> with an autonomous local medical station.
+        </p>
+        <p>
+          <strong>Reverse-Engineered Huami BLE Protocol:</strong>
+          Consumer smartwatches typically force telemetry into Chinese or third-party cloud servers. Orbita isolates the watch via macOS CoreBluetooth and Python (<code>bleak</code>), implementing the proprietary <strong>AES-128 challenge-response handshake on GATT <code>0x0009</code></strong>. This unlocks raw optical PPG streams (<code>0x2A37</code>), device event sniffing (<code>0x0010</code>), and bidirectional alert dispatch (<code>0x2A46</code>) completely offline.
+        </p>
+        <p>
+          <strong>Biometric Signal Processing:</strong>
+          The station reconstructs Inter-Beat Intervals (RR) to derive <strong>HRV (SDNN)</strong> and calculates an <strong>Autonomic Stress Index (0–100)</strong> reflecting sympathetic fight-or-flight vs. parasympathetic rest tone. All data flows locally to the aerospace console at <code>127.0.0.1:8766</code>.
+        </p>
+        <div style="background: var(--bg-panel-sunken); padding: 12px; border-radius: 6px; border: 1px solid var(--border-subtle);" class="mono">
+          <div style="color: var(--neon-emerald); font-weight: 700; margin-bottom: 4px;">// Telemetry Pipeline</div>
+          Bip U (PPG/SpO2/Accel) ➔ BLE AES-128 ➔ Python Bridge ➔ Local SSE/REST ➔ Orbita HUD Console ➔ Wrist Haptic Danger Dispatch
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="mission-footer">
+    <div><strong>Orbita (AURA-OS)</strong> · 2026 NASA International Space Apps Challenge · Crew Health & Exploration Biometrics</div>
+    <div style="margin-top: 4px; color: var(--text-dim);">
+      COTS Bioastronautics Telemetry Platform · 100% Offline Edge Autonomy · Ready for Artemis Mars Transit
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

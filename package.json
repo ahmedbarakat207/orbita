@@ -7,7 +7,8 @@
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
-    "bridge": "tools/.venv/bin/python tools/bip_u_bridge.py"
+    "bridge": "tools/.venv/bin/python tools/bip_u_bridge.py",
+    "app": "bash scripts/make-app.sh"
   },
   "devDependencies": {
     "vite": "^8.3.4",

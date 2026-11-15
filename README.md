@@ -37,7 +37,7 @@ Amazfit Bip U (BLE)
       ▼
 Python BLE Bridge  ◄──────────────────────────────────────────┐
 (tools/bip_u_bridge.py)                                       │
-      │  HTTP REST (localhost:8765)                           │
+      │  HTTP REST (localhost:8766)                           │
       ▼                                                       │
 Vite Dashboard  ──── danger alert ──► Desktop Notification    │
 (index.html / src/)  ──────────────► Watch Haptic + Alert ───┘
@@ -61,13 +61,26 @@ Vite Dashboard  ──── danger alert ──► Desktop Notification    │
 
 ## 🚀 Setup
 
-### Prerequisites
-- Node.js ≥ 18
-- Python ≥ 3.11 with `bleak`, `aiohttp`
-- macOS / Linux (BLE stack)
-- Amazfit Bip U watch
+### One-click run (recommended)
 
-### Install & Run
+```bash
+npm install                                  # dashboard deps
+cd tools && python3 -m venv .venv && .venv/bin/pip install bleak aiohttp && cd ..   # bridge deps
+npm run app                                  # builds Orbita.app
+```
+
+Then **double-click `Orbita.app`**. It starts the BLE bridge, starts the dashboard, waits for the watch link, opens the dashboard in your browser, and keeps both modules supervised (auto-restarts them if they crash). Everything is idempotent — modules already running are left alone, so you can still run `npm run bridge` / `npm run dev` manually.
+
+- First launch: if macOS asks for **Bluetooth permission, click Allow**.
+- Logs: `~/Library/Logs/Orbita/` (`launcher.log`, `bridge.log`, `dashboard.log`)
+- Stop everything: `pkill -f "Orbita.app/Contents/MacOS/Orbita"; pkill -f bip_u_bridge`
+- Rebuild the app after code changes: `npm run app`
+
+> Note: the app bundle's launcher is compiled as a native arm64 stub because LaunchServices runs script-only app bundles under Rosetta on some Macs, which breaks the arm64-only Python wheels in `tools/.venv`.
+
+### Manual run (equivalent, for development)
+
+Prerequisites: Node.js ≥ 18, Python ≥ 3.11, macOS (BLE stack), Amazfit Bip U watch.
 
 ```bash
 # 1. Install dashboard dependencies
@@ -121,7 +134,7 @@ fasa/
 
 ---
 
-## 📡 Bridge API (localhost:8765)
+## 📡 Bridge API (localhost:8766)
 
 | Endpoint | Method | Description |
 |---|---|---|

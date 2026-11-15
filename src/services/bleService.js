@@ -181,7 +181,7 @@ export class BleService {
         return await this.connectBridge();
       } catch (_) {
         throw new Error(
-          'Web Bluetooth is disabled in this browser (e.g. Brave). Either start tools/bip_u_bridge.py or enable brave://flags/#enable-web-bluetooth.'
+          'Web Bluetooth is unavailable. Open http://localhost:5173 in Chrome/Edge (Safari/Firefox lack it, Brave needs brave://flags/#enable-web-bluetooth, LAN URLs are not secure contexts), or run `npm run bridge`.'
         );
       }
     }
